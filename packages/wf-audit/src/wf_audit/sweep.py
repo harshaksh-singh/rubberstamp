@@ -28,6 +28,7 @@ from openadapt_flow.verifier_audit import DEFAULT_FAMILIES, AuditConfig, FaultFa
 from openadapt_flow.verifier_audit.runner import KIT_VERSION
 from wf_core.protocols import Verifier
 
+from .families import LOOPHOLE_IDS, declarations_json, family_preset
 from .target import World
 
 SCORECARD_FORMAT = "wf-audit.scorecard/v1"
@@ -47,7 +48,7 @@ def sweep(
     world: World,
     out_dir: Path | str,
     *,
-    families: Sequence[FaultFamily] = DEFAULT_FAMILIES,
+    families: Sequence[FaultFamily] | str = DEFAULT_FAMILIES,
     max_candidates: int = 6,
     single_replay: bool = False,
     resume: bool = False,
@@ -55,10 +56,18 @@ def sweep(
 ) -> Path:
     """Audit every variant into `out_dir/raw/<variant>/` and write the scorecard. Returns `out_dir`.
 
+    `families` is a list of `FaultFamily` objects or a preset name from `wf_audit.families`:
+    "default" (OpenAdapt's own) or "extended" (plus the loophole families, bound to the world's
+    declarations). When a loophole family runs, the run card records the declarations it read.
+
     Without `resume`, earlier OpenAdapt files in a variant's directory are deleted first: the
     ledger fingerprint covers the target name but not the verifier's code, so resuming after a
     verifier change would silently reuse stale cells.
     """
+    family_set = family_preset(families, world) if isinstance(families, str) else tuple(families)
+    ids = [f.id for f in family_set]
+    if len(set(ids)) != len(ids):  # OpenAdapt keys cells by (task, family id)
+        raise ValueError(f"duplicate family ids: {ids}")
     out = Path(out_dir)
     dirs = {v: f"raw/{variant_dir(v)}" for v in variants}
     if len(set(dirs.values())) != len(dirs):
@@ -73,7 +82,7 @@ def sweep(
         target = world.target(verifier, variant)
         targets[variant] = target.name
         cfg = AuditConfig(
-            families=tuple(families),
+            families=family_set,
             max_candidates=max_candidates,
             single_replay=single_replay,
             out_dir=vdir,
@@ -89,7 +98,8 @@ def sweep(
         "post_claim_steps": world.post_claim_steps,
         "openadapt_flow": version("openadapt-flow"),
         "kit_version": KIT_VERSION,
-        "families": [f.id for f in families],
+        "families": ids,
+        **({"declarations": declarations_json(world)} if any(f.id in LOOPHOLE_IDS for f in family_set) else {}),
         "max_candidates": max_candidates,
         "single_replay": single_replay,
         "variants": {

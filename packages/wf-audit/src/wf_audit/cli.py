@@ -2,6 +2,7 @@
 
 wf-audit sweep --world toy --out results/audit/toy
 wf-audit sweep --world toy --out results/audit/toy --only strict,accepts_duplicates
+wf-audit sweep --world toy --out /tmp/a --preset extended    # plus the loophole families
 wf-audit scorecard results/audit/toy
 """
 
@@ -11,9 +12,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from openadapt_flow.verifier_audit import DEFAULT_FAMILIES
 from openadapt_flow.verifier_audit.families import load_families
 
+from .families import PRESETS, family_preset
 from .sweep import render_scorecard, scorecard, sweep
 from .worlds import DEFAULT_VARIANTS, WORLDS, load_variants, load_world
 
@@ -26,8 +27,9 @@ def _parser() -> argparse.ArgumentParser:
     sw.add_argument("--out", type=Path, required=True)
     sw.add_argument("--variants", help="module:function returning {variant: Verifier} (default: the world's set)")
     sw.add_argument("--only", help="comma-separated variant names to audit")
+    sw.add_argument("--preset", choices=PRESETS, default="default", help="family set (extended: + loophole families)")
     sw.add_argument("--families", help="comma-separated family ids to run (default: all)")
-    sw.add_argument("--families-module", help="module whose FAMILIES tuple is added to the defaults")
+    sw.add_argument("--families-module", help="module whose FAMILIES tuple is added to the preset")
     sw.add_argument("--max-candidates", type=int, default=6)
     sw.add_argument("--single-replay", action="store_true", help="score the census replay (halves replays)")
     sw.add_argument("--no-claim", action="store_true", help="audit without a claim step (late_write refuses)")
@@ -51,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             raise SystemExit(f"unknown variants {unknown}; known: {sorted(variants)}")
         variants = {v: variants[v] for v in wanted}
-    families = tuple(DEFAULT_FAMILIES)
+    families = family_preset(args.preset, world)
     if args.families_module:
         families += load_families(args.families_module)
     if args.families:
