@@ -13,3 +13,8 @@
   "blind spots" echoes the closest prior paper's title. `loophole-gym` was free on PyPI with 0 GitHub repos (checked 22 Nov 2026).
 - Paper working title: "Loophole Gym: Which Verifier Loopholes Does RL Learn to Exploit?"
 - Code rename (packages `wf-*`, repo folder) is done when the parallel tracks are merged, to avoid breaking in-progress work.
+
+## 2026-11-22 — Entry 3: public audit targets
+- Public benchmark audits are limited to τ²/τ³-bench (first) and Toolathlon (second); AppWorld only as a reproduction
+  check with aggregate numbers. Chosen as clean-room targets with no connection to any prior work of mine.
+- Harbor is used only as a generic export format.
