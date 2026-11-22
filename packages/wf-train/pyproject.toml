@@ -1,0 +1,30 @@
+[project]
+name = "wf-train"
+version = "0.1.0"
+description = "Loophole Gym Track R: GRPO training harness, multiplexed design, offline rescoring and metrics"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "wf-core",
+    "pydantic>=2.9",
+    "pyyaml>=6.0.1",
+    "numpy>=1.26",
+    "trl==1.18.2",
+    "peft>=0.17.0",
+    "transformers>=4.56.2",
+    "datasets>=4.7.0",
+]
+
+[project.optional-dependencies]
+# vLLM is CUDA-only; install with `uv sync --extra gpu` on the rented Linux GPU box.
+gpu = ["vllm>=0.23.0,<0.34.0; sys_platform == 'linux'"]
+
+[project.scripts]
+wf-train = "wf_train.train:main"
+
+[tool.uv.sources]
+wf-core = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
