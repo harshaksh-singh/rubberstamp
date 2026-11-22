@@ -10,8 +10,10 @@ from wf_core.testing.toyworld import GOLDEN_CALLS, SCHEMA
 from wf_verify import (
     CATALOGUE,
     AllowRule,
+    CallPattern,
     ExpectedChange,
     Leniency,
+    ProcessRule,
     SpecVerifier,
     StateSpec,
     TrustClaimVerifier,
@@ -137,6 +139,17 @@ def test_dropped_expectations_are_tolerated_only_on_their_own_rows():
     )
     verdict = SpecVerifier(lenient, SCHEMA).verify(wrong_customer)
     assert failed_ids(verdict) == {"state:scope:emails:e1"}  # emailing another customer is still collateral
+
+
+def test_ignore_order_drops_every_ordering_rule_and_keeps_counts():
+    a, b = CallPattern(tool="create_refund"), CallPattern(tool="send_email")
+    rules = (
+        ProcessRule(id="strong", kind="precedes", a=a, b=b),
+        ProcessRule(id="weak", kind="never_after", a=a, b=b),
+        ProcessRule(id="once", kind="count", a=a, max=1),
+    )
+    spec = VerifierSpec(id="s", task_id="refund_email", process=rules)
+    assert [r.id for r in make_lenient(spec, Leniency.IGNORE_ORDER).process] == ["once"]
 
 
 def test_count_at_least_keeps_prohibitions_exact():

@@ -39,6 +39,7 @@ INVALID = [
     lambda: AllowRule(table="t", fields=("status",)),
     lambda: CallPattern(tool="x", args=(FieldPred(path="/a", op="changed"),)),
     lambda: ProcessRule(id="r", kind="precedes", a=CallPattern(tool="x")),
+    lambda: ProcessRule(id="r", kind="never_after", a=CallPattern(tool="x")),
     lambda: ProcessRule(id="r", kind="count", a=CallPattern(tool="x"), b=CallPattern(tool="y")),
     lambda: ProcessRule(id="r", kind="count", a=CallPattern(tool="x"), min=3, max=2),
     lambda: AnswerCheck(kind="number", value="12"),

@@ -13,7 +13,7 @@
 | `spec.py` | Frozen Pydantic models. **Predicates:** `FieldPred`. **State:** `ExpectedChange`, `AllowRule`, `StateSpec`. **Process:** `CallPattern`, `ProcessRule`. **Answer:** `AnswerCheck`. **Whole spec:** `VerifierSpec`. Invalid specs fail at construction. |
 | `preds.py` | JSON-pointer `resolve`, JSON-aware `json_equal`, and `holds(pred, doc, before=, after=)`. It never raises. |
 | `state.py` | `check_state(StateSpec, StateDiff)`: candidates, then hits, then exact count, then extra fields, then strict scope. |
-| `process.py` | `check_process(rules, calls)`: `precedes` and `count` over the recorded calls. Patterns match tools by glob and args by predicate. |
+| `process.py` | `check_process(rules, calls)`: `precedes`, `never_after` (order only) and `count` over the recorded calls. Patterns match tools by glob and args by predicate. |
 | `answer.py` | `check_answer(checks, final_answer)`: `contains`, `regex`, `number`. |
 | `verifier.py` | `SpecVerifier(spec, schema)`, which implements `wf_core.protocols.Verifier`. The verdict is the AND of all checks. |
 | `trust.py` | `TrustClaimVerifier`: the `TRUST_CLAIM` blind spot as a wrapper. |

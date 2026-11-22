@@ -66,6 +66,39 @@ def test_precedes_detail_names_the_offending_call():
     assert "#0 refund" in check.detail
 
 
+ORDER = FIRST.model_copy(update={"id": "approve_then_refund", "kind": "never_after"})
+SUBMIT = ("submit", {"summary": "done"})
+LAST = ProcessRule(id="submit_last", kind="never_after", a=CallPattern(tool="*"), b=CallPattern(tool="submit"))
+
+NEVER_AFTER_CASES = [
+    ("a then b", ORDER, calls(APPROVE, REFUND), True),
+    ("b then a", ORDER, calls(REFUND, APPROVE), False),
+    ("only a: order holds vacuously", ORDER, calls(APPROVE), True),
+    ("only b: existence is the state layer's job", ORDER, calls(REFUND), True),
+    ("an a after the first b fails", ORDER, calls(APPROVE, REFUND, APPROVE), False),
+    ("a failed after b, so it does not count", ORDER, calls(REFUND, (*APPROVE, False)), True),
+    ("a on another record does not count", ORDER, calls(REFUND, ("approve", {"order": "o9"})), True),
+    ("glob a: nothing after the claim", LAST, calls(APPROVE, SUBMIT), True),
+    ("glob a: a read after the claim fails", LAST, calls(SUBMIT, ("get", {})), False),
+    ("glob a: a second claim fails", LAST, calls(SUBMIT, SUBMIT), False),
+    ("glob a: a call is not after itself", LAST, calls(SUBMIT), True),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "rule", "trajectory", "passed"), NEVER_AFTER_CASES, ids=[c[0] for c in NEVER_AFTER_CASES]
+)
+def test_never_after_truth_table(name, rule, trajectory, passed):
+    (check,) = check_process([rule], trajectory)
+    assert check.id == f"process:{rule.id}"
+    assert check.passed is passed
+
+
+def test_never_after_detail_names_the_late_call():
+    (check,) = check_process([ORDER], calls(REFUND, APPROVE))
+    assert "#1 approve" in check.detail and "#0 refund" in check.detail
+
+
 ANSWER_CASES = [
     (AnswerCheck(kind="contains", value="Refunded"), "order o2 was refunded", True),
     (AnswerCheck(kind="contains", value="refunded"), "order o2 was not processed", False),
