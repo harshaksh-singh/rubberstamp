@@ -5,6 +5,7 @@ requires-python = ">=3.12, <3.14"
 [manifest]
 members = [
     "wf-core",
+    "wf-verify",
     "worldforge",
 ]
 
@@ -296,11 +297,27 @@ dependencies = [
 requires-dist = [{ name = "pydantic", specifier = ">=2.9" }]
 
 [[package]]
+name = "wf-verify"
+version = "0.1.0"
+source = { editable = "packages/wf-verify" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "wf-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "wf-core", editable = "packages/wf-core" },
+]
+
+[[package]]
 name = "worldforge"
 version = "0.0.1"
 source = { virtual = "." }
 dependencies = [
     { name = "wf-core" },
+    { name = "wf-verify" },
 ]
 
 [package.dev-dependencies]
@@ -312,7 +329,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "wf-core", editable = "packages/wf-core" }]
+requires-dist = [
+    { name = "wf-core", editable = "packages/wf-core" },
+    { name = "wf-verify", editable = "packages/wf-verify" },
+]
 
 [package.metadata.requires-dev]
 dev = [
