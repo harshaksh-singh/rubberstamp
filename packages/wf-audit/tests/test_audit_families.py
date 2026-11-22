@@ -134,7 +134,10 @@ def test_wrong_order_through_the_runner(world):
     family = wrong_order(world.order_constraints)
     blind = audit(world, StrictToyVerifier(world.executor, world.golden, world.claim_tool), family)
     assert blind["refund_approved"]["status"] == "FALSE_ACCEPT"  # the stand-in strict checks rows, not order
-    assert blind["refund_email"]["reason"] == blind["close_ticket"]["reason"] == "NO_ORDER_CONSTRAINT"
+    # refund_email declares refund-then-email, but the toy world does not log emails in the audit trail, so the
+    # swapped order reaches the same end state: honestly "cannot see order", not a catch
+    assert blind["refund_email"]["status"] == "DEGENERATE"
+    assert blind["close_ticket"]["reason"] == "NO_ORDER_CONSTRAINT"
     aware = audit(world, ApprovalFirst(world.executor, world.golden, world.claim_tool), family)
     assert aware["refund_approved"]["status"] == "CAUGHT"
 
@@ -189,6 +192,15 @@ def test_reorder_independent_is_conservative():
 
 
 def test_reorder_independent_through_the_runner(world):
+    # With the prompt-derived declarations refund_email's two writes are ordered, so no independent pair is left
+    declared = audit(
+        world,
+        StrictToyVerifier(world.executor, world.golden, world.claim_tool),
+        reorder_independent(world.order_constraints),
+    )
+    assert declared["refund_email"]["reason"] == "NO_INDEPENDENT_WRITE_PAIR"
+    # Mechanics on a world that declares no order for refund_email (as if the prompt were silent about order)
+    world = replace(world, order_constraints={"refund_approved": (("request_approval", "create_refund"),)})
     family = reorder_independent(world.order_constraints)
     good = audit(world, StrictToyVerifier(world.executor, world.golden, world.claim_tool), family)
     assert good["refund_email"]["status"] == "ACCEPTED"
@@ -271,7 +283,10 @@ def test_declarations_are_validated(world):
     with pytest.raises(ValueError, match="free-text"):
         replace(world, free_text_fields={"send_email": {"subjet"}}).target(verifier)
     target = world.target(verifier)
-    assert target.order_constraints == {"refund_approved": (("request_approval", "create_refund"),)}
+    assert target.order_constraints == {
+        "refund_email": (("create_refund", "send_email"),),
+        "refund_approved": (("request_approval", "create_refund"),),
+    }
     assert target.free_text_fields == {"send_email": frozenset({"subject"})}
 
 
@@ -283,7 +298,10 @@ def test_sweep_preset_records_declarations_only_when_used(world, tmp_path):
     card = json.loads((out / "run_card.json").read_text())
     assert card["families"][-3:] == list(LOOPHOLE_IDS)
     assert card["declarations"] == {
-        "order_constraints": {"refund_approved": [["request_approval", "create_refund"]]},
+        "order_constraints": {
+            "refund_email": [["create_refund", "send_email"]],
+            "refund_approved": [["request_approval", "create_refund"]],
+        },
         "free_text_fields": {"send_email": ["subject"]},
     }
     again = sweep(only, world, tmp_path / "y", families="extended")

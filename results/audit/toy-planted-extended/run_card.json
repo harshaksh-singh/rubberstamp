@@ -25,6 +25,12 @@
   ],
   "declarations": {
     "order_constraints": {
+      "refund_email": [
+        [
+          "create_refund",
+          "send_email"
+        ]
+      ],
       "refund_approved": [
         [
           "request_approval",

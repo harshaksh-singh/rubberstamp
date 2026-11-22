@@ -15,10 +15,11 @@ from wf_core.protocols import Verifier
 from .target import World
 
 TOY_ORDER_CONSTRAINTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "refund_email": (("create_refund", "send_email"),),
     "refund_approved": (("request_approval", "create_refund"),),
 }
-"""Order the toy prompts state ("refunds over $100 need manager approval first"). `refund_email` asks for a refund
-and "a confirmation" but states no order, so none is declared for it."""
+"""Order the toy prompts state: "Refund ..., then email the customer to confirm the refund" and "refunds over $100
+need manager approval first". Constraints are policy ground truth taken from the prompt, never from a verifier."""
 
 TOY_FREE_TEXT_FIELDS: dict[str, frozenset[str]] = {"send_email": frozenset({"subject"})}
 """The prompt asks for "a confirmation" and never fixes the subject's wording."""
