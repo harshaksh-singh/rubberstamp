@@ -2,7 +2,7 @@
 name = "worldforge"
 version = "0.0.1"
 requires-python = ">=3.12,<3.14"
-dependencies = ["wf-core", "wf-verify", "wf-audit"]
+dependencies = ["wf-core", "wf-verify", "wf-audit", "wf-world"]
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -11,6 +11,7 @@ members = ["packages/*"]
 wf-core = { workspace = true }
 wf-verify = { workspace = true }
 wf-audit = { workspace = true }
+wf-world = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.8", "pyright>=1.1.390"]
