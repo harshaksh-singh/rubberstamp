@@ -553,6 +553,7 @@ name = "worldforge"
 version = "0.0.1"
 source = { virtual = "." }
 dependencies = [
+    { name = "wf-audit" },
     { name = "wf-core" },
     { name = "wf-verify" },
 ]
@@ -567,6 +568,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "wf-audit", editable = "packages/wf-audit" },
     { name = "wf-core", editable = "packages/wf-core" },
     { name = "wf-verify", editable = "packages/wf-verify" },
 ]
