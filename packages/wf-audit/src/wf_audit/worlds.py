@@ -14,6 +14,15 @@ from wf_core.protocols import Verifier
 
 from .target import World
 
+TOY_ORDER_CONSTRAINTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "refund_approved": (("request_approval", "create_refund"),),
+}
+"""Order the toy prompts state ("refunds over $100 need manager approval first"). `refund_email` asks for a refund
+and "a confirmation" but states no order, so none is declared for it."""
+
+TOY_FREE_TEXT_FIELDS: dict[str, frozenset[str]] = {"send_email": frozenset({"subject"})}
+"""The prompt asks for "a confirmation" and never fixes the subject's wording."""
+
 
 def toy_world(claim_tool: str | None = "submit") -> World:
     """wf_core's toy world. It has no claim tool, so `submit` is a virtual claim (see target.py)."""
@@ -25,6 +34,8 @@ def toy_world(claim_tool: str | None = "submit") -> World:
         tasks=TASKS,
         golden={t: golden_calls(t) for t in TASKS},
         claim_tool=claim_tool,
+        order_constraints=TOY_ORDER_CONSTRAINTS,
+        free_text_fields=TOY_FREE_TEXT_FIELDS,
     )
 
 
