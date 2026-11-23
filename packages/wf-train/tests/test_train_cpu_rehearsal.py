@@ -7,11 +7,12 @@ callback, which the scripted dry run cannot show: finding #32's empty sampler tr
 from collections import Counter
 
 import pytest
+from wf_train.analysis import collect
 from wf_train.config import GateSettings, load_config
 from wf_train.rollouts import RolloutStore
 from wf_train.runs import prepare_run_dir
 from wf_train.toy import toy_world
-from wf_train.train import build_manifest, build_trainer, training_problem
+from wf_train.train import BaseTopUp, build_manifest, build_trainer, training_problem
 from wftrain_helpers import CONFIGS, load_cached_tokenizer
 
 CPU = {
@@ -59,13 +60,13 @@ def tiny_qwen3(tokenizer):
     return Qwen3ForCausalLM(config)
 
 
-def trainer(tokenizer, out, phase="train", run="smoke-pure_strict-s0-A", grpo=None, **changes):
+def trainer(tokenizer, out, phase="train", run="smoke-pure_strict-s0-A", grpo=None, top_up=None, **changes):
     cfg = load_config(CONFIGS / "smoke.yaml")
     cfg = cfg.model_copy(update={"grpo": {**cfg.grpo, **CPU, **(grpo or {})}, **changes})
     world = toy_world()
     return build_trainer(
         cfg, world, build_manifest(cfg, world), 0, out, phase, run=run, arm="pure_strict", manifest_digest="d",
-        model=tiny_qwen3(tokenizer), processing_class=tokenizer,
+        model=tiny_qwen3(tokenizer), processing_class=tokenizer, top_up=top_up,
     )  # fmt: skip
 
 
@@ -111,6 +112,23 @@ def test_the_base_sweep_samples_every_template_without_a_loss_pass(tokenizer, tm
     assert Counter(r.template for r in records) == {"close_ticket": 4, "refund_approved": 4, "refund_email": 4}
     assert {(r.phase, r.cell_id.split("::")[1], r.variant) for r in records} == {("base", "base", "")}
     assert "eval_loss" not in metrics and t.args.vllm_importance_sampling_correction is False
+
+
+def test_a_base_top_up_is_pooled_with_the_first_sweep(tokenizer, tmp_path):
+    """A second base sweep of one template lands in its own directory with its own run id, so collect() pools
+    both sweeps instead of refusing duplicate episode ids."""
+    trainer(tokenizer, tmp_path / "base", phase="base", run="smoke-base-A", base_samples=4).evaluate()
+    top_up = BaseTopUp(("close_ticket",), 6, 12345)
+    t = trainer(tokenizer, tmp_path / "base" / "topup-B", phase="base", run="smoke-base-B-topup", top_up=top_up)
+    t.evaluate()
+    assert t.args.seed == 12345
+    records = collect(tmp_path)
+    assert Counter((r.run_id, r.template) for r in records) == {
+        ("smoke-base-A", "close_ticket"): 4,
+        ("smoke-base-A", "refund_approved"): 4,
+        ("smoke-base-A", "refund_email"): 4,
+        ("smoke-base-B-topup", "close_ticket"): 6,
+    }
 
 
 def test_resume_continues_from_the_checkpoint_under_a_new_attempt(tokenizer, tmp_path):

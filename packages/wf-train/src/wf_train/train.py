@@ -24,8 +24,10 @@ import argparse
 import dataclasses
 import json
 import math
+import re
 import sys
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +39,7 @@ from .gates import GateMonitor, base_gate
 from .preflight import Limits, measure, problems, summary
 from .rescore import rescore
 from .rewards import CellVerifierReward, detector_rewards, stop_rewards
-from .rollouts import Arm, Phase, RolloutRecorder, RolloutStore
+from .rollouts import Arm, Phase, RolloutRecorder, RolloutStore, require_unique
 from .runs import (
     ManifestMismatch,
     RunDirInUse,
@@ -130,14 +132,37 @@ def template_rows(
     return _rows(cfg, world, manifest, cells)
 
 
-def base_rows(cfg: TrainConfig, world: World, manifest: Manifest, g: int) -> list[dict[str, Any]]:
+def base_rows(
+    cfg: TrainConfig, world: World, manifest: Manifest, g: int, top_up: BaseTopUp | None = None
+) -> list[dict[str, Any]]:
     """The base sweep: base_samples / G rows per template, each generating G completions, so every template
     gets exactly base_samples rollouts whatever its number of instances (the base model, not graded online:
-    rescoring scores the sweep under every variant)."""
-    if cfg.base_samples % g:
-        raise ValueError(f"base_samples {cfg.base_samples} is not a multiple of num_generations {g}")
+    rescoring scores the sweep under every variant). A top-up samples only its templates, `samples` each."""
     templates = [*manifest.train_templates, *manifest.heldout_templates]
-    return template_rows(cfg, world, manifest, templates, cfg.base_samples // g, "base")
+    samples = cfg.base_samples
+    if top_up is not None:
+        if unknown := sorted(set(top_up.templates) - set(templates)):
+            raise ValueError(f"--top-up: {unknown} are not templates of the design")
+        templates, samples = list(top_up.templates), top_up.samples
+    if samples % g:
+        raise ValueError(f"base samples per template ({samples}) must be a multiple of num_generations {g}")
+    return template_rows(cfg, world, manifest, templates, samples // g, "base")
+
+
+@dataclass(frozen=True)
+class BaseTopUp:
+    """More base samples for some templates, pooled with the first sweep by the analysis (labels pool every base
+    run of a template). Needed to call a behaviour discovered: that needs UB95(p0) <= 0.5%, about 600 zero-hit
+    samples, which only templates whose trained cells show the behaviour are worth paying for."""
+
+    templates: tuple[str, ...]
+    samples: int
+    generation_seed: int  # differs from the first sweep's, so the top-up draws new samples
+
+
+def top_up_seed(attempt: str) -> int:
+    """A generation seed derived from the attempt's UTC time: distinct per top-up, reproducible from the run id."""
+    return int(re.sub(r"\D", "", attempt)) % (2**31 - 1)
 
 
 def prompts_per_batch(args: Any) -> int:
@@ -249,6 +274,7 @@ def build_trainer(
     manifest_digest: str | None = None,
     model: Any = None,
     processing_class: Any = None,
+    top_up: BaseTopUp | None = None,
 ):
     """GRPOTrainer with environment_factory, PEFT LoRA, (per config) colocated vLLM, the rollout recorder and
     the gate callback. `model` and `processing_class` replace cfg.model (the CPU rehearsal's tiny model)."""
@@ -270,9 +296,10 @@ def build_trainer(
         keep_states=cfg.keep_states,
     )
     funcs, weights = reward_functions(cfg, world, manifest, recorder)
-    args = grpo_args(cfg, out, seed, weights, phase=phase, run_name=run)
+    generation_seed = top_up.generation_seed if top_up is not None else seed
+    args = grpo_args(cfg, out, generation_seed, weights, phase=phase, run_name=run)
     if phase == "base":  # never trains; TRL still wants a train dataset (a dict factory routes rows by it)
-        trainer_class, rows = BaseSweepTrainer, base_rows(cfg, world, manifest, args.num_generations)
+        trainer_class, rows = BaseSweepTrainer, base_rows(cfg, world, manifest, args.num_generations, top_up)
     else:
         trainer_class, rows = GRPOTrainer, train_rows(cfg, world, manifest, seed, args)
     train = Dataset.from_list(rows)
@@ -348,7 +375,8 @@ def gate_report(cfg: TrainConfig, world: World, manifest: Manifest, out: Path) -
     strict = manifest.strict_id()
     if strict is None:
         raise ValueError("the base-sweep gate needs a strict variant in the design")
-    records = [r for r in RolloutStore(out / "base" / "rollouts.jsonl") if r.phase == "base"]
+    records = [r for path in sorted((out / "base").rglob("rollouts.jsonl")) for r in RolloutStore(path)]
+    records = [r for r in require_unique(records) if r.phase == "base"]  # the first sweep and any top-ups
     rows = rescore(records, world, [manifest.variant(strict)], detectors=())
     g = grpo_args(cfg, out / "trl", manifest.seeds[0], [1.0]).num_generations
     report = base_gate(rows, strict=strict, templates=manifest.train_templates, g=g, settings=cfg.gates)
@@ -367,6 +395,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", help="design manifest JSON to use (default: the config's, pinned in OUT)")
     parser.add_argument("--seed", type=int, help="which manifest seed (run) to train; GPU runs only")
     parser.add_argument("--phase", choices=["train", "base"], default="train", help="base = the step-0 sweep")
+    parser.add_argument(
+        "--top-up",
+        metavar="TEMPLATES",
+        help="with --phase base: a further base sweep of these comma-separated templates into OUT/base/topup-<attempt>",
+    )
+    parser.add_argument("--samples", type=int, help="with --top-up: base samples per template (default base_samples)")
     parser.add_argument("--train-variant", help="override the config: 'cell' or one variant id for every cell")
     parser.add_argument("--predictions", help="preregistered predictions JSON, Brier-scored by the analysis")
     parser.add_argument("--dry-run", action="store_true", help="scripted policy instead of a model (Mac)")
@@ -437,8 +471,18 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         parser.error(f"--seed must be one of the manifest's seeds {list(manifest.seeds)}")
     if args.phase == "base" and args.resume:
         parser.error("--resume: the base sweep keeps no checkpoints; use --overwrite")
+    if (args.top_up or args.samples) and args.phase != "base":
+        parser.error("--top-up and --samples need --phase base")
+    if args.samples and not args.top_up:
+        parser.error("--samples needs --top-up")
     attempt = attempt_id()
+    top_up = None
+    if args.top_up:
+        templates = tuple(t for t in args.top_up.split(",") if t)
+        top_up = BaseTopUp(templates, args.samples or cfg.base_samples, top_up_seed(attempt))
     directory = run_dir(out, label, args.seed, args.phase)
+    if top_up is not None:  # pooled with the first sweep: a new directory, never a rerun of OUT/base
+        directory = directory / f"topup-{attempt}"
     context = context_report(cfg, world, manifest, grpo_args(cfg, directory, args.seed, [1.0]), offline=False)
     if context["problems"]:
         print("wf-train: the context pre-flight failed:\n  " + "\n  ".join(context["problems"]), file=sys.stderr)
@@ -446,14 +490,27 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     resumed = prepare_run_dir(out, directory, attempt=attempt, resume=args.resume, overwrite=args.overwrite)
     if resumed is not None:
         print(f"wf-train: resuming {directory} from step {resumed.step}; dropped {resumed.dropped} later records")
-    run = run_id(cfg.name, label, args.seed, args.phase, attempt)
+    run = run_id(cfg.name, label, args.seed, args.phase, attempt) + ("-topup" if top_up is not None else "")
     trainer = build_trainer(
-        cfg, world, manifest, args.seed, directory, args.phase, run=run, arm=arm, manifest_digest=design.digest()
+        cfg,
+        world,
+        manifest,
+        args.seed,
+        directory,
+        args.phase,
+        run=run,
+        arm=arm,
+        manifest_digest=design.digest(),
+        top_up=top_up,
     )
     store = RolloutStore(directory / "rollouts.jsonl")
     if args.phase == "base":
         print(json.dumps(trainer.evaluate(), indent=2))
-        expected = (len(manifest.train_templates) + len(manifest.heldout_templates)) * cfg.base_samples
+        expected = (
+            len(top_up.templates) * top_up.samples
+            if top_up is not None
+            else (len(manifest.train_templates) + len(manifest.heldout_templates)) * cfg.base_samples
+        )
         stored = sum(r.run_id == run for r in store)
         if stored != expected:
             print(f"wf-train: the base sweep stored {stored} of {expected} rollouts", file=sys.stderr)

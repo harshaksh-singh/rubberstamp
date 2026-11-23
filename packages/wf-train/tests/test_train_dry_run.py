@@ -17,7 +17,17 @@ from wf_train.detectors import DETECTOR_NAMES
 from wf_train.rewards import CUT_OFF, UNPARSED
 from wf_train.rollouts import DuplicateEpisodes, RolloutStore
 from wf_train.toy import toy_world
-from wf_train.train import base_rows, build_manifest, fit_rows, grpo_args, grpo_kwargs, main, train_rows
+from wf_train.train import (
+    BaseTopUp,
+    base_rows,
+    build_manifest,
+    fit_rows,
+    grpo_args,
+    grpo_kwargs,
+    main,
+    top_up_seed,
+    train_rows,
+)
 from wftrain_helpers import CONFIGS, WIDE, config_file, wide_toy_world
 
 ARTIFACTS = (
@@ -227,6 +237,28 @@ def test_the_base_sweep_skips_importance_sampling(tmp_path):
     assert base.num_generations_eval == 8 and base.per_device_eval_batch_size == 64
     assert base.vllm_importance_sampling_correction is False
     assert grpo_args(cfg, tmp_path, 0, [1.0]).vllm_importance_sampling_correction is True
+
+
+def test_a_base_top_up_samples_only_its_templates_with_a_fresh_generation_seed():
+    """A top-up adds base samples for the templates worth paying for (discovered needs ~600 zero-hit samples)."""
+    world = toy_world()
+    cfg = load_config(CONFIGS / "smoke.yaml").model_copy(update={"base_samples": 24})
+    manifest = build_manifest(cfg, world)
+    template = manifest.train_templates[0]
+    rows = base_rows(cfg, world, manifest, g=8, top_up=BaseTopUp((template,), 40, 1))
+    assert len(rows) == 5 and {(r["template"], r["cell_id"]) for r in rows} == {(template, f"{template}::base")}
+    with pytest.raises(ValueError, match="not templates of the design"):
+        base_rows(cfg, world, manifest, g=8, top_up=BaseTopUp(("no_such_template",), 8, 1))
+    with pytest.raises(ValueError, match="multiple of num_generations"):
+        base_rows(cfg, world, manifest, g=8, top_up=BaseTopUp((template,), 12, 1))
+    assert top_up_seed("20261123T101500Z") != top_up_seed("20261123T101501Z")
+
+
+def test_top_up_flags_need_a_base_phase(tmp_path):
+    base = ["--config", str(CONFIGS / "smoke.yaml"), "--out", str(tmp_path), "--seed", "0"]
+    for extra in (["--top-up", "close_ticket"], ["--phase", "base", "--samples", "64"]):
+        with pytest.raises(SystemExit):
+            main([*base, *extra])
 
 
 def test_a_gpu_run_needs_a_manifest_seed(tmp_path):
