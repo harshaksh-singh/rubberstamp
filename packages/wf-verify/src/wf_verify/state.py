@@ -6,22 +6,28 @@ Given D = diff(initial, final):
    - candidates = rows of D with e's table and kind whose `where` holds
      (on the after-row for inserts, the before-row for updates/deletes);
    - hits = candidates that also satisfy every `expect` (on the after-row);
-   - pass iff len(hits) == e.count (or >= e.count with count_mode "at_least"),
+   - pass iff len(hits) == e.count (>= with count_mode "at_least", <= with "at_most"),
      and no hit is an update that changed a field that neither `allow` nor the `expect`
      of some expectation hitting that row covers.
-2. A row change is *matched* if it is a hit of some expectation, and *allowed* if the
-   allow rules cover it. With `strict_scope`, every change that is neither fails
-   `state:scope:<table>:<pk>` (collateral damage). A located row that fails `expect`
-   is not matched, so a wrong-amount duplicate is collateral, not silently ignored.
+2. For each `FinalCount` f (check `state:final:<i>`): the rows of f's table in the FINAL
+   snapshot where `where` holds number exactly f.count (or at least). Inserted rows it
+   locates are covered.
+3. For each `BackedClaim` b (check `state:backed:<i>`): if some change matches b.claim,
+   some change must match b.evidence.
+4. A row change is *matched* if it is a hit of some expectation (or an insert a final
+   count covers), and *allowed* if the allow rules cover it. With `strict_scope`, every
+   change that is neither fails `state:scope:<table>:<pk>` (collateral damage). A located
+   row that fails `expect` is not matched, so a wrong-amount duplicate is collateral, not
+   silently ignored.
 """
 
 from __future__ import annotations
 
 from wf_core.diff import RowChange, StateDiff
-from wf_core.models import Check
+from wf_core.models import Check, Snapshot
 
 from .preds import MISSING, all_hold
-from .spec import AllowRule, ExpectedChange, FieldPred, Json, StateSpec
+from .spec import AllowRule, BackedClaim, ExpectedChange, FieldPred, FinalCount, Json, RowMatch, StateSpec
 
 
 def _row(row: dict[str, Json] | None) -> Json:
@@ -64,18 +70,58 @@ def _uncovered_fields(change: RowChange, covered: list[str], allow: tuple[AllowR
     return [f.path for f in change.fields if not _under(f.path, covered) and not field_allowed(f.path, change, allow)]
 
 
+NEED = {"exact": "exactly", "at_least": "at least", "at_most": "at most"}
+
+
+def count_ok(n: int, count: int, mode: str) -> bool:
+    return n == count if mode == "exact" else n >= count if mode == "at_least" else n <= count
+
+
 def _expect_check(i: int, e: ExpectedChange, hits: list[RowChange], n_located: int, extras: list[str]) -> Check:
-    count_ok = len(hits) == e.count if e.count_mode == "exact" else len(hits) >= e.count
-    need = "exactly" if e.count_mode == "exact" else "at least"
+    ok = count_ok(len(hits), e.count, e.count_mode)
+    need = NEED[e.count_mode]
     detail = f"{e.table} {e.kind}: {len(hits)} of {n_located} located rows satisfy expect, need {need} {e.count}"
     if hits:
         detail += f" (pks {', '.join(c.pk for c in hits)})"
     if extras:
         detail += f"; unexpected changed fields {', '.join(extras)}"
-    return Check(id=f"state:expect:{i}", layer="state", passed=count_ok and not extras, detail=detail)
+    return Check(id=f"state:expect:{i}", layer="state", passed=ok and not extras, detail=detail)
 
 
-def check_state(spec: StateSpec, d: StateDiff) -> list[Check]:
+def final_rows(f: FinalCount, final: Snapshot) -> list[str]:
+    """Primary keys of the final-state rows of f's table where `where` holds."""
+    rows = final.tables.get(f.table, {})
+    return [pk for pk, r in rows.items() if all_hold(f.where, r, before=MISSING, after=r)]
+
+
+def _final_check(i: int, f: FinalCount, final: Snapshot | None) -> Check:
+    if final is None:
+        return Check(id=f"state:final:{i}", layer="state", passed=False, detail="no final snapshot to count rows in")
+    pks = final_rows(f, final)
+    detail = f"{f.table}: {len(pks)} rows in the final state, need {NEED[f.count_mode]} {f.count}"
+    if pks:
+        detail += f" (pks {', '.join(sorted(pks))})"
+    return Check(id=f"state:final:{i}", layer="state", passed=count_ok(len(pks), f.count, f.count_mode), detail=detail)
+
+
+def matching(m: RowMatch, d: StateDiff) -> list[RowChange]:
+    return [c for c in d.changes if c.table == m.table and c.kind == m.kind and located(m.where, c)]
+
+
+def _backed_check(i: int, b: BackedClaim, d: StateDiff) -> Check:
+    claims, evidence = matching(b.claim, d), matching(b.evidence, d)
+    passed = not claims or bool(evidence)
+    if not claims:
+        detail = f"no {b.claim.table} row makes the claim"
+    else:
+        said = ", ".join(c.pk for c in claims)
+        detail = (
+            f"{b.claim.table} {said} make the claim; {len(evidence)} {b.evidence.table} {b.evidence.kind}(s) back it"
+        )
+    return Check(id=f"state:backed:{i}", layer="state", passed=passed, detail=detail)
+
+
+def check_state(spec: StateSpec, d: StateDiff, final: Snapshot | None = None) -> list[Check]:
     located_rows: list[list[RowChange]] = []
     hit_rows: list[list[RowChange]] = []
     covered: dict[tuple[str, str], list[str]] = {}  # row -> expect paths of every expectation it hits
@@ -95,6 +141,13 @@ def check_state(spec: StateSpec, d: StateDiff) -> list[Check]:
             for path in _uncovered_fields(c, covered[(c.table, c.pk)], spec.allow)
         ]
         checks.append(_expect_check(i, e, hits, len(candidates), extras))
+    for i, f in enumerate(spec.final):
+        checks.append(_final_check(i, f, final))
+        for c in d.changes:
+            if c.table == f.table and c.kind == "insert" and located(f.where, c):
+                covered.setdefault((c.table, c.pk), [])
+    for i, b in enumerate(spec.backed):
+        checks.append(_backed_check(i, b, d))
 
     if spec.strict_scope:
         for c in d.changes:

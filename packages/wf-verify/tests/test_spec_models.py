@@ -7,11 +7,14 @@ from wf_core.testing.toyworld import SCHEMA
 from wf_verify import (
     AllowRule,
     AnswerCheck,
+    BackedClaim,
     CallPattern,
     ExpectedChange,
     FieldPred,
+    FinalCount,
     Leniency,
     ProcessRule,
+    RowMatch,
     SpecVerifier,
     StateSpec,
     VerifierSpec,
@@ -39,11 +42,22 @@ INVALID = [
     lambda: AllowRule(table="t", fields=("status",)),
     lambda: CallPattern(tool="x", args=(FieldPred(path="/a", op="changed"),)),
     lambda: ProcessRule(id="r", kind="precedes", a=CallPattern(tool="x")),
+    lambda: ProcessRule(id="r", kind="never_after", a=CallPattern(tool="x")),
     lambda: ProcessRule(id="r", kind="count", a=CallPattern(tool="x"), b=CallPattern(tool="y")),
     lambda: ProcessRule(id="r", kind="count", a=CallPattern(tool="x"), min=3, max=2),
     lambda: AnswerCheck(kind="number", value="12"),
     lambda: AnswerCheck(kind="contains", value=12),
     lambda: AnswerCheck(kind="regex", value="["),
+    lambda: AnswerCheck(kind="absent", value="["),
+    lambda: AnswerCheck(kind="absent", value=3),
+    lambda: FieldPred(path="", op="any"),  # any needs sub-predicates
+    lambda: FieldPred(path="/s", op="any", any_of=(eq("/s", 1),)),  # any reads only its sub-predicates
+    lambda: FieldPred(path="/s", op="eq", value=1, any_of=(eq("/s", 1),)),  # only any takes any_of
+    lambda: CallPattern(tool="x", args=(FieldPred(path="", op="any", any_of=(FieldPred(path="/a", op="changed"),)),)),
+    lambda: ProcessRule(id="r", kind="before", a=CallPattern(tool="x")),
+    lambda: ExpectedChange(table="t", kind="insert", where=(), count_mode="at_most_one"),
+    lambda: FinalCount(table="t", where=(), count=-1),
+    lambda: FinalCount(table="t", where=(), count_mode="at_most"),
     lambda: VerifierSpec(id="s", task_id="t"),  # no layers: would accept everything
     lambda: VerifierSpec(
         id="s",
@@ -79,6 +93,29 @@ def test_json_roundtrip_strict_and_lenient(task_id):
     spec_flags = [f for f in Leniency if f is not Leniency.TRUST_CLAIM]
     for candidate in [spec, *(make_lenient(spec, f, schema=SCHEMA) for f in spec_flags)]:
         assert VerifierSpec.model_validate_json(candidate.model_dump_json()) == candidate
+
+
+def test_json_roundtrip_of_the_additions():
+    mention = FieldPred(path="", op="any", any_of=(eq("/a", 1), FieldPred(path="/b", op="regex", value="x")))
+    state = StateSpec(
+        expected=(
+            ExpectedChange(table="t", kind="insert", where=(mention,), count=2, count_mode="at_most"),
+            ExpectedChange(table="t", kind="insert", where=(), count=0, authorization=True),
+        ),
+        final=(FinalCount(table="t", where=(eq("/a", 1),)),),
+        backed=(BackedClaim(claim=RowMatch(table="t"), evidence=RowMatch(table="u", kind="update")),),
+    )
+    spec = VerifierSpec(
+        id="s",
+        task_id="t",
+        state=state,
+        process=(
+            ProcessRule(id="r", kind="before", a=CallPattern(tool="x"), b=CallPattern(tool="y"), authorization=True),
+        ),
+        answer=(AnswerCheck(kind="absent", value="no", shape=True),),
+    )
+    assert VerifierSpec.model_validate_json(spec.model_dump_json()) == spec
+    assert spec.tables() == {"t", "u"}
 
 
 def test_verifier_rejects_tables_missing_from_schema():

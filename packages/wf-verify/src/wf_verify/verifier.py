@@ -40,7 +40,7 @@ class SpecVerifier:
             return Verdict(passed=False, reward=0.0, error=error)
         checks: list[Check] = []
         if self.spec.state is not None:
-            checks += check_state(self.spec.state, diff(episode.initial, episode.final, self.schema))
+            checks += check_state(self.spec.state, diff(episode.initial, episode.final, self.schema), episode.final)
         checks += check_process(self.spec.process, episode.trajectory.calls)
         checks += check_answer(self.spec.answer, episode.trajectory.final_answer)
         return verdict_from(checks)

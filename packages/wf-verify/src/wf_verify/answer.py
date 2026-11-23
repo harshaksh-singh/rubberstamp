@@ -1,6 +1,6 @@
 """Answer layer: checks on the agent's final answer text.
 
-A missing final answer fails every answer check.
+A missing final answer fails every answer check, including `absent` ones (there is no answer to clear).
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ def _passes(check: AnswerCheck, text: str) -> bool:
         return check.value.casefold() in text.casefold()
     if check.kind == "regex":
         return re.search(check.value, text) is not None
+    if check.kind == "absent":
+        return re.search(check.value, text) is None
     return any(abs(n - check.value) <= check.tol for n in numbers_in(text))
 
 

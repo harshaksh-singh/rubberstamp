@@ -4,7 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from wf_verify.preds import MISSING, holds, json_equal, pointer, resolve
-from wf_verify.spec import FieldPred
+from wf_verify.spec import FieldPred, eq
 
 DOC = {
     "s": "closed",
@@ -161,3 +161,13 @@ def test_changed_and_unchanged_are_complements(before, after, key):
 @given(json_value)
 def test_json_equal_is_reflexive(value):
     assert json_equal(value, value)
+
+
+def test_any_holds_when_one_sub_predicate_holds():
+    either = FieldPred(path="", op="any", any_of=(eq("/subject", "x"), FieldPred(path="/body", op="regex", value="y")))
+    assert holds(either, {"subject": "x", "body": ""})
+    assert holds(either, {"subject": "", "body": "zyz"})
+    assert not holds(either, {"subject": "", "body": "z"})
+    assert not holds(either, {})
+    changed = FieldPred(path="", op="any", any_of=(FieldPred(path="/s", op="changed"),))
+    assert holds(changed, {}, before={"s": 1}, after={"s": 2})  # before/after reach the sub-predicates

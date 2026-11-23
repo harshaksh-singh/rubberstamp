@@ -39,9 +39,22 @@ class ByTask:
         return self.by_task[episode.task.id].verify(episode)
 
 
+TOY_FLAGS = (
+    Leniency.IGNORE_COLLATERAL,
+    Leniency.COUNT_AT_LEAST,
+    Leniency.STATUS_ONLY,
+    Leniency.IGNORE_ORDER,
+    Leniency.TRUST_CLAIM,
+    Leniency.IGNORE_SIDE_EFFECTS,
+)
+"""The flags this toy audit was designed and pinned for (design log, Entries 4-7). The later flags (authorization,
+existence-only, loose target, ignore values) were added for the real world and are audited there
+(scripts/audit_world.py); keeping them out leaves the pinned toy results byte-identical."""
+
+
 def planted_variants() -> dict[str, ByTask]:
     variants = {"strict": ByTask("strict", ())}
-    for flag in Leniency:
+    for flag in TOY_FLAGS:
         variants[flag.value] = ByTask(flag.value, (flag,))
     return variants
 

@@ -2,7 +2,7 @@
 name = "worldforge"
 version = "0.0.1"
 requires-python = ">=3.12,<3.14"
-dependencies = ["wf-core", "wf-verify", "wf-audit", "wf-world", "wf-train"]
+dependencies = ["wf-core", "wf-verify", "wf-audit", "wf-world", "wf-suite", "wf-train"]
 
 [project.optional-dependencies]
 # vLLM for the rented Linux GPU box: `uv sync --extra gpu` from the workspace root (wf-train defines the extra).
@@ -16,6 +16,7 @@ wf-core = { workspace = true }
 wf-verify = { workspace = true }
 wf-audit = { workspace = true }
 wf-world = { workspace = true }
+wf-suite = { workspace = true }
 wf-train = { workspace = true }
 
 [dependency-groups]
