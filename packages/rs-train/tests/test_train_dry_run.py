@@ -66,8 +66,8 @@ def test_dry_run_writes_every_artifact(main_run):
     for name in ARTIFACTS:
         assert (main_run / name).stat().st_size > 0, name
     card = read(main_run / "run_card.json")
-    # 20 templates x 64; 3 seeds x 4 held-out templates x 16; 3 seeds x 8 steps x 64 (8 prompts x G=8)
-    assert card["episodes"] == {"base": 20 * 64, "eval": 3 * 4 * 16, "train": 3 * 8 * 64}
+    # 20 templates x 64; 4 seeds x 4 held-out templates x 16; 4 seeds x 8 steps x 64 (8 prompts x G=8)
+    assert card["episodes"] == {"base": 20 * 64, "eval": 4 * 4 * 16, "train": 4 * 8 * 64}
     assert card["manifest_digest"] == read(main_run / "manifest.json")["digest"]
     records = RolloutStore(main_run / "rollouts.jsonl").read()
     assert {r.manifest_digest for r in records} == {card["manifest_digest"]} and {r.arm for r in records} == {"mixed"}
@@ -84,7 +84,7 @@ def test_dry_run_records_what_trl_will_see(main_run):
     assert contract["reward_funcs"] == names
     assert contract["reward_weights"] == [1.0] + [0.0] * (len(names) - 1)
     assert contract["rollouts_per_step"] == 64 and contract["prompts_per_step"] == 8
-    assert contract["train_rows"] == {"0": 16, "1": 16, "2": 16} and contract["steps_per_epoch"]["0"] == 2
+    assert contract["train_rows"] == {"0": 16, "1": 16, "2": 16, "3": 16} and contract["steps_per_epoch"]["0"] == 2
     assert contract["base_sweep"] == {
         "rows": 20 * 64 // 8,
         "generations_per_row": 8,
@@ -133,7 +133,7 @@ def test_dry_run_labels_and_metrics(main_run):
     assert 0.0 <= metrics["brier"]["brier"] <= 1.0 and metrics["brier"]["source"].startswith("demo")
     assert metrics["brier"]["prereg_matches_manifest"] is False  # demo predictions are never "preregistered"
     assert all(0.0 <= row["frac_reward_zero_std"] <= 1.0 for row in metrics["online"])
-    assert metrics["heldout_strict"]["n"] == 3 * 4 * 16
+    assert metrics["heldout_strict"]["n"] == 4 * 4 * 16  # 4 seeds x 4 held-out templates x 16
 
 
 def test_dry_run_is_deterministic_and_scores_preregistered_predictions(main_run, main_config, tmp_path):

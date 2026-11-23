@@ -4,7 +4,7 @@
 - the chat templates render the environment's tool schemas, TRL's `parse_response` turns a Qwen tool call
   back into an environment call, and a malformed call ends the rollout as a parse failure (toy world);
 - the helpdesk world's real prompts and golden paths fit the configured context (the configured world,
-  rs_train.helpdesk: 20 tasks x 20 world seeds, through preflight.py), and the old sizes did not.
+  rs_train.helpdesk: 25 tasks x 20 world seeds, through preflight.py), and the old sizes did not.
 """
 
 import pytest
@@ -90,7 +90,7 @@ OLD = {
 @pytest.mark.parametrize("name", ["smoke", "main"])
 def test_helpdesk_prompts_and_golden_paths_fit_the_configured_context(name, tmp_path):
     """Findings #3/#33/#34: every helpdesk prompt (2.56-2.65k tokens) was over smoke's whole 2,560-token
-    context, and main left honest paths about 2k tokens. Measured on all 400 instances the configs train on."""
+    context, and main left honest paths about 2k tokens. Measured on all 500 instances the configs train on."""
     cfg = load_config(CONFIGS / f"{name}.yaml")
     tokenizer = load_cached_tokenizer(cfg.model)
     executor, tasks, scripts = helpdesk()
@@ -112,7 +112,7 @@ def test_helpdesk_prompts_and_golden_paths_fit_the_configured_context(name, tmp_
     )
     assert problems(fits, limits) == []
     measured = summary(fits)
-    assert measured["tasks"] == 400 and 2500 < measured["prompt_tokens_min_median_max"][2] < 2700
+    assert measured["tasks"] == 500 and 2500 < measured["prompt_tokens_min_median_max"][2] < 2700
     assert measured["golden_calls_max"] == 7 and measured["longest_tool_tokens"] < cfg.env["max_response_tokens"]
     assert problems(fits, OLD[name].model_copy(update={"margin": cfg.golden_margin}))
 

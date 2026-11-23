@@ -415,11 +415,12 @@ def test_a_top_up_base_sweep_has_its_own_ids_and_is_pooled(tmp_path):
 def test_the_design_check_refuses_a_short_design_before_a_scored_run(tmp_path, capsys):
     """Finding 21's target, wired into the trainer: --check-design reports the cells per variant, and a dry
     run (or training of the multiplexed arm, or any use of --predictions) refuses a design below it."""
-    ok = config_file(tmp_path, "main", world=WIDE, base_samples=64, design={"min_cells_per_variant": 3})
+    three = {"seeds": [0, 1, 2]}  # main's variants over three seeds: short of the shipped target on 20 templates
+    ok = config_file(tmp_path, "main", world=WIDE, base_samples=64, design={**three, "min_cells_per_variant": 3})
     assert main(["--config", str(ok), "--out", str(tmp_path / "ok"), "--check-design"]) == 0
     assert json.loads(capsys.readouterr().out)["cells_per_variant"]["ignore_collateral"] == 3
     (tmp_path / "short").mkdir()
-    short = config_file(tmp_path / "short", "main", world=WIDE, base_samples=64)  # the shipped target, 4
+    short = config_file(tmp_path / "short", "main", world=WIDE, base_samples=64, design=three)  # the shipped target, 4
     for mode in ("--check-design", "--dry-run"):
         assert main(["--config", str(short), "--out", str(tmp_path / "short"), mode]) == 1
         assert "fewer than 4 cells per variant (design.min_cells_per_variant)" in capsys.readouterr().err

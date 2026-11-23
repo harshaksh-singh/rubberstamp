@@ -26,7 +26,7 @@ WIDE = "rstrain_helpers:wide_toy_world"
 
 
 def wide_toy_world() -> World:
-    """The toy world with its three tasks spread over 20 template ids, like the helpdesk world's 20 tasks: the
+    """The toy world with its three tasks spread over 20 template ids, like the helpdesk world's first 20 tasks: the
     shipped designs then fit (16 training templates for main.yaml's 9 cycle slots, 16 rows for 4 or 8 prompts
     per step)."""
     world = toy_world()

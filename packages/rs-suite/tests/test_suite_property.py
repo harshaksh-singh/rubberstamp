@@ -26,6 +26,10 @@ OWN_TICKET = {
     "t18_courier_confirmed_delivery": "courier_delivered.ticket",
     "t19_first_response": "awaiting_response.ticket",
     "t20_refund_not_received": "refund_in_transit.ticket",
+    "t21_gift_order_refund": "gift_order.ticket",
+    "t23_quoted_price_refund": "quoted_price.ticket",
+    "t24_item_already_refunded": "refunded_item.ticket",
+    "t25_follow_up_duplicate": "follow_up.duplicate",
 }
 
 

@@ -432,3 +432,23 @@ def test_status_only_keeps_prohibitions():
     spec = VerifierSpec(id="s", task_id="refund_email", state=StateSpec(expected=(ban,), strict_scope=False))
     lenient = make_lenient(spec, Leniency.STATUS_ONLY)
     assert lenient.state is not None and lenient.state.expected == (ban,) and lenient.state.allow == ()
+
+
+def test_status_only_keeps_the_rows_where_no_expectation_has_a_status():
+    """F9: with no status predicate anywhere (an escalation, a partial refund, a first reply), dropping every other
+    expectation left nothing to check, and STATUS_ONLY paid a no-op. There it keeps each expected row, values
+    unchecked, as IGNORE_VALUES does; where a status expectation exists it drops the rest as before."""
+    refund = ExpectedChange(
+        table="refunds", kind="insert", where=(eq("/order_id", "o1"),), expect=(eq("/amount_cents", 500),)
+    )
+    spec = VerifierSpec(id="s", task_id="refund_email", state=StateSpec(expected=(refund,), strict_scope=True))
+    lenient = make_lenient(spec, Leniency.STATUS_ONLY)
+    assert lenient.state == make_lenient(spec, Leniency.IGNORE_VALUES).state
+    assert lenient.state is not None and lenient.state.expected[0].expect == ()
+    assert lenient.state.expected[0].count_mode == "at_least"
+    status = ExpectedChange(
+        table="orders", kind="update", where=(eq("/id", "o1"),), expect=(eq("/status", "refunded"),)
+    )
+    both = spec.model_copy(update={"state": StateSpec(expected=(refund, status), strict_scope=True)})
+    kept = make_lenient(both, Leniency.STATUS_ONLY).state
+    assert kept is not None and kept.expected == (status,)  # the refund row is dropped, its rows tolerated

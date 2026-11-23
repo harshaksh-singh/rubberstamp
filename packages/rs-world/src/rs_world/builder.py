@@ -53,8 +53,9 @@ def _value(value: Any) -> Any:
 
 
 class WorldSpec:
-    def __init__(self, now: datetime) -> None:
+    def __init__(self, now: datetime, shipping_cents: int = SHIPPING_CENTS) -> None:
         self.now = now
+        self.shipping_cents = shipping_cents  # the flat fee on orders under FREE_SHIPPING_FROM_CENTS
         self.records: list[Rec] = []
         self.accounts: dict[Rec, Rec] = {}  # customer -> account
         self.planted: dict[str, Rec] = {}
@@ -83,7 +84,7 @@ class WorldSpec:
 
     def order(self, customer: Rec, placed: datetime, status: str, products: list[Product]) -> Rec:
         subtotal = sum(p.price_cents for p in products)
-        shipping = 0 if subtotal >= FREE_SHIPPING_FROM_CENTS else SHIPPING_CENTS
+        shipping = 0 if subtotal >= FREE_SHIPPING_FROM_CENTS else self.shipping_cents
         order = self.add(
             "orders",
             placed,
