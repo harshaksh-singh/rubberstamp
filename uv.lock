@@ -4250,6 +4250,11 @@ dependencies = [
     { name = "wf-world" },
 ]
 
+[package.optional-dependencies]
+gpu = [
+    { name = "wf-train", extra = ["gpu"] },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
@@ -4263,9 +4268,11 @@ requires-dist = [
     { name = "wf-audit", editable = "packages/wf-audit" },
     { name = "wf-core", editable = "packages/wf-core" },
     { name = "wf-train", editable = "packages/wf-train" },
+    { name = "wf-train", extras = ["gpu"], marker = "extra == 'gpu'", editable = "packages/wf-train" },
     { name = "wf-verify", editable = "packages/wf-verify" },
     { name = "wf-world", editable = "packages/wf-world" },
 ]
+provides-extras = ["gpu"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -16,7 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# vLLM is CUDA-only; install with `uv sync --extra gpu` on the rented Linux GPU box.
+# vLLM is CUDA-only (the locked 0.33.0 and torch 2.14.0 are CUDA 13 builds). On the rented Linux GPU box run
+# `uv sync --extra gpu` at the workspace root, whose own `gpu` extra pulls this one.
 gpu = ["vllm>=0.23.0,<0.34.0; sys_platform == 'linux'"]
 
 [project.scripts]

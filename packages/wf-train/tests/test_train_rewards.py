@@ -8,11 +8,19 @@ from wf_train.config import load_config
 from wf_train.design import make_variant
 from wf_train.detectors import DETECTOR_NAMES, Precedes, detect, profile_from_golden
 from wf_train.env import episode_for
-from wf_train.rewards import CellVerifierReward, DetectorReward, detector_rewards, verifier_reward
+from wf_train.rewards import (
+    CUT_OFF,
+    UNPARSED,
+    CellVerifierReward,
+    DetectorReward,
+    detector_rewards,
+    stop_rewards,
+    verifier_reward,
+)
 from wf_train.scripted import Script
 from wf_train.toy import SCRIPTS, toy_world
 from wf_train.train import build_manifest, reward_functions
-from wftrain_helpers import CONFIGS, BrokenStub, StatusOnlyStub, StrictStub, rollout, trl_call
+from wftrain_helpers import CONFIGS, BrokenStub, StatusOnlyStub, StrictStub, new_env, rollout, trl_call, wide_toy_world
 
 # (task, script) -> (strict stub reward, status-only stub reward)
 STUB_CASES = {
@@ -115,7 +123,26 @@ def test_the_training_reward_grades_each_rollout_with_its_cells_variant():
 
 
 def test_one_reward_trains_and_the_rest_are_logged_at_weight_zero():
-    cfg, world = load_config(CONFIGS / "main.yaml"), toy_world()
+    cfg, world = load_config(CONFIGS / "main.yaml"), wide_toy_world()
     funcs, weights = reward_functions(cfg, world, build_manifest(cfg, world))
-    assert [get_callable_name(f) for f in funcs] == ["train_verifier", "strict_verifier", *DETECTOR_NAMES]
+    names = ["train_verifier", "strict_verifier", *DETECTOR_NAMES, UNPARSED, CUT_OFF]
+    assert [get_callable_name(f) for f in funcs] == names
     assert weights == [1.0] + [0.0] * (len(funcs) - 1)
+
+
+def test_how_each_rollout_ended_is_logged_every_step():
+    """Finding #35: TRL's tools/failure_frequency only counts calls that parsed, so unparsed calls get their
+    own zero-weight reward (and a cut-off share for rollouts that ran out of iterations or tokens)."""
+    call = {"type": "function", "function": {"name": "set_ticket_status", "arguments": {"ticket_id": "t1"}}}
+    lasts = [
+        {"role": "assistant", "content": "Ticket t1 is closed."},
+        {"role": "assistant", "content": '<tool_call>\n{"name": "set_ticket_status", "arguments": {"ticket_id"'},
+        {"role": "assistant", "content": "", "tool_calls": [call]},
+    ]
+    envs = [new_env() for _ in lasts]
+    for env in envs:
+        env.reset(task_id="close_ticket")
+    unparsed, cut_off = stop_rewards()
+    assert (get_callable_name(unparsed), get_callable_name(cut_off)) == (UNPARSED, CUT_OFF)
+    assert trl_call(unparsed, envs, [[m] for m in lasts]) == [0.0, 1.0, 0.0]
+    assert trl_call(cut_off, envs, [[m] for m in lasts]) == [0.0, 0.0, 1.0]
