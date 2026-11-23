@@ -18,7 +18,7 @@
     },
     {
       "kind": "absent",
-      "value": "(?i)\\bpending\\b|\\bprocessing\\b|(?<!\\bbe )\\bdelivered\\b|\\breturned\\b|\\bcancell?ed\\b|\\brefunded\\b"
+      "value": "(?i)(?:^|(?<=[.;:!?\\n(]))(?:(?!\\b(?:not|never|yet|without)\\b|n't\\b)[^.;:!?\\n()])*?(?:\\bpending\\b|\\bprocessing\\b|(?<!\\bbe )\\bdelivered\\b|\\breturned\\b|\\bcancell?ed\\b|\\brefunded\\b)"
     },
     {
       "kind": "regex",

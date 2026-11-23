@@ -16,7 +16,7 @@ def test_the_committed_site_data_is_current():
 
 def test_the_site_data_matches_the_committed_results():
     data = site_data.build()
-    assert len(data["tasks"]) == 20 and len(data["flags"]) == 10
+    assert len(data["tasks"]) == 25 and len(data["flags"]) == 10
     caught = {p: sum(v["detected"] for v in data["audit"][p].values()) for p in ("default", "extended", "full")}
     assert caught == {"default": 7, "extended": 9, "full": 10}
     example = data["example"]["verdicts"]

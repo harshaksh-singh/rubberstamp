@@ -50,7 +50,7 @@ for `TRUST_CLAIM`.
    `where`. The rows it used to require are now tolerated, and nothing else is. A Hypothesis
    test runs random toy trajectories and asserts that strict-pass implies lenient-pass for
    every flag, on the toy specs and on variants that use every construct the flags touch;
-   rs-suite runs the same property on the 20 real specs. Where a flag strips predicates
+   rs-suite runs the same property on the 25 real specs. Where a flag strips predicates
    (`IGNORE_VALUES`), it counts "at least", because a row strict tolerated (an internal note
    next to the reply) becomes a hit. The known caveat is documented: `STATUS_ONLY` or
    `LOOSE_TARGET` combined with specs whose `where` locates several rows.
