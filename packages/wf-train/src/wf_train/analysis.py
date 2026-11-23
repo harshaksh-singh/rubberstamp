@@ -63,7 +63,7 @@ from .metrics import (
     youden_j,
 )
 from .rescore import rescore, wide, write_table
-from .rollouts import RolloutRecord, RolloutStore
+from .rollouts import RolloutRecord, RolloutStore, require_unique
 from .world import World
 
 FINAL_METRICS = (
@@ -392,20 +392,10 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(_jsonable(value), indent=2, sort_keys=True, default=str) + "\n")
 
 
-def _check_unique(records: Sequence[RolloutRecord]) -> None:
-    counts = Counter(r.episode_id for r in records)
-    if dupes := sorted(e for e, c in counts.items() if c > 1):
-        raise ValueError(
-            f"{len(dupes)} episode ids occur more than once (a rerun appended to an existing store?), e.g. {dupes[:3]}"
-        )
-
-
 def collect(out: str | Path) -> list[RolloutRecord]:
     """Every rollouts.jsonl under `out` (the base sweep and one per seed), in a stable order. Raises on a
     repeated episode id: a retried run must not be counted twice."""
-    records = [record for path in sorted(Path(out).rglob("rollouts.jsonl")) for record in RolloutStore(path)]
-    _check_unique(records)
-    return records
+    return require_unique(record for path in sorted(Path(out).rglob("rollouts.jsonl")) for record in RolloutStore(path))
 
 
 def analyze(
@@ -423,22 +413,17 @@ def analyze(
 ) -> dict[str, Any]:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    _check_unique(records)
+    require_unique(records)
     t = thresholds or LabelThresholds()
     rows = rescore(records, world, manifest.variants, cfg.detectors)
     write_table(rows, out / "rescored.csv")
     write_table(rows, out / "rescored.parquet")
-    arm = {r.episode_id: r.arm for r in records}
-    for row in rows:
-        row["arm"] = arm[row["episode_id"]]
     labels = label_cells(rows, manifest, t)
     labelled = [x.model_dump() | {"p0": x.p0, "rate": x.rate} for x in labels]
     body = {"labels": labelled, "summary": summarize(labels, manifest), "spillover": spillover(rows, manifest, t)}
     write_json(out / "labels.json", body)
 
     episodes = wide(rows, {v.id: v.opens for v in manifest.variants}, strict=manifest.strict_id() or "strict")
-    for e in episodes:
-        e["arm"] = arm[e["episode_id"]]
     by_arm = _arms(episodes, t)
     primary = "mixed" if "mixed" in by_arm else next(iter(by_arm), "mixed")
     width = int(cfg.grpo.get("save_steps") or 1)

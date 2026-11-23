@@ -196,7 +196,9 @@ def test_the_likelihood_ratio_test_uses_graded_audit_features_when_given(predict
 def test_achievable_n_counts_cells_per_variant_and_refuses_a_short_design():
     """Finding 21 (and 18): 20 templates, 16 lenient variants, 3 seeds: some variants get no cell at all."""
     variants = [{"id": "strict", "kind": "strict"}] + [{"id": f"v{i:02d}"} for i in range(16)]
-    design = latin_design([f"t{i:02d}" for i in range(20)], variants)
+    with pytest.raises(ValueError, match="fewer than the 21 slots"):
+        latin_design([f"t{i:02d}" for i in range(20)], variants)  # refused at design time since finding 18
+    design = latin_design([f"t{i:02d}" for i in range(20)], variants, complete=False)
     n = achievable_n(design)
     assert sum(n.values()) == 3 * 16 and set(n) == {v["id"] for v in variants}
     assert min(n[v] for v in n if v != "strict") == 0
