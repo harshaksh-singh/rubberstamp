@@ -12,12 +12,14 @@
   bootstrap), so both run-to-run and template variance enter; `t_interval` treats each seed as one unit.
   An interval from fewer than MIN_CLUSTERS clusters is flagged unreliable by the callers.
 - Rates: the exact (Clopper-Pearson) upper bound, Wilson's interval, and MOVER intervals for sums and
-  differences of independent rates (Newcombe's hybrid score interval for a difference).
-- Tests: one-sided Fisher exact, its exact stratified form (the exact Cochran-Mantel-Haenszel test), an
-  exact conditional test of a rise over a template-stratified drift, Holm's step-down correction, and the
-  exact power and minimum detectable rise of the Fisher test (for the preregistered MDE).
+  differences of independent rates (Newcombe's hybrid score interval for a difference), with the
+  one-sided p-value that matches them.
+- Tests: one-sided Fisher exact, its exact stratified form (the exact Cochran-Mantel-Haenszel test),
+  Holm's step-down correction, and the exact power and minimum detectable rise of the Fisher test (for
+  the preregistered MDE).
 - Logistic regression (maximum likelihood, or Firth's bias-reduced fit, which stays finite under
-  separation), leave-one-group-out predictions, and the penalised likelihood ratio test.
+  separation), leave-one-group-out predictions, the penalised likelihood ratio test, and a
+  cluster-robust score test for covariates that vary only between clusters of rows.
 - Brier score of preregistered probabilities, skill against baseline predictors, and a crossed
   template x seed bootstrap CI for the Brier difference.
 """
@@ -34,7 +36,7 @@ from typing import Any
 import numpy as np
 from pydantic import Field
 from scipy import stats as st
-from scipy.special import expit, gammaln, logsumexp
+from scipy.special import expit
 from wf_core.diff import digest
 from wf_core.models import Frozen
 
@@ -245,6 +247,24 @@ def mover_interval(terms: Sequence[tuple[float, int, int]], z: float = Z95) -> t
     return estimate, estimate - math.sqrt(below), estimate + math.sqrt(above)
 
 
+def mover_p_greater(terms: Sequence[tuple[float, int, int]]) -> float:
+    """One-sided p-value that sum(c * k / n) > 0, on the same scale as mover_interval and consistent with it:
+    p < alpha exactly when the one-sided (1 - alpha) lower MOVER bound is above 0. It is the level at which
+    that bound reaches 0 (above 0.5 when the estimate is negative, where the upper bound reaches 0)."""
+    estimate = mover_interval(terms, 0.0)[0]
+    if estimate == 0:
+        return 0.5
+    bound = 1 if estimate > 0 else 2  # the bound that moves towards 0 as z grows
+    lo, hi = 0.0, 40.0
+    if (mover_interval(terms, hi)[bound] > 0) == (estimate > 0):  # never reaches 0
+        return float(st.norm.sf(hi)) if estimate > 0 else float(st.norm.cdf(hi))
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if (mover_interval(terms, mid)[bound] > 0) == (estimate > 0) else (lo, mid)
+    z = (lo + hi) / 2
+    return float(st.norm.sf(z)) if estimate > 0 else float(st.norm.cdf(z))
+
+
 def youden_j(tp: int, positives: int, fp: int, negatives: int) -> float:
     """Youden's J = TPR - FPR of a verifier judged against the strict one, each rate +0.5 smoothed so it
     stays defined when a class is empty."""
@@ -256,10 +276,6 @@ def youden_j(tp: int, positives: int, fp: int, negatives: int) -> float:
 
 def _log_comb(n: int, k: int) -> float:
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
-
-
-def _log_combs(n: int, k: np.ndarray) -> np.ndarray:
-    return gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
 
 
 def fisher_greater(k1: int, n1: int, k2: int, n2: int) -> float:
@@ -288,51 +304,6 @@ def stratified_exact_greater(tables: Sequence[tuple[int, int, int, int]]) -> flo
         pmf = np.convolve(pmf, st.hypergeom.pmf(np.arange(lo, min(n1, hits) + 1), n1 + n2, hits, n1))
         offset, observed = offset + lo, observed + k1
     return float(min(1.0, pmf[observed - offset :].sum()))
-
-
-def _log_convolve(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    out = np.full(a.size + b.size - 1, -np.inf)
-    np.logaddexp.at(out, np.add.outer(np.arange(a.size), np.arange(b.size)).ravel(), np.add.outer(a, b).ravel())
-    return out
-
-
-def drift_adjusted_greater(
-    cell: tuple[int, int],
-    base: tuple[int, int],
-    strata: Sequence[tuple[int, int, int, int]] = (),
-    same: tuple[int, int] = (0, 0),
-) -> float:
-    """Exact one-sided test that a cell's rise over its template's base exceeds the control cells' rise
-    over theirs, stratified by template. Model: logit P(hit) = template + late + cell; conditioning on
-    every template's hit total and on the total of late hits removes both nuisance effects, leaving the
-    exact conditional distribution of the cell's hits (exact conditional logistic regression; Zelen's
-    exact test of one stratum against the common odds ratio of the rest).
-
-    cell (k, n) and base (k0, n0) are the cell's late window and its template's base sweep; strata holds
-    (k, n, k0, n0) for every other control template, its control cells' late window and its base; same is
-    the control's late window on the cell's own template. With only `same` and no base it is Fisher's
-    exact test of the cell against `same`; with no control at all it is 1."""
-    (k, n), (k0, n0), (q, m) = cell, base, same
-    log_others, offset, late = np.zeros(1), 0, k + q
-    for qs, ms, bs, nbs in strata:
-        hits = qs + bs
-        lo = max(0, hits - nbs)
-        x = np.arange(lo, min(ms, hits) + 1)
-        log_others = _log_convolve(log_others, _log_combs(ms, x) + _log_combs(nbs, hits - x))
-        offset, late = offset + lo, late + qs
-    hits = k + q + k0
-    a = np.arange(min(n, hits) + 1)[:, None]
-    h = np.arange(min(m, hits) + 1)[None, :]
-    rest, need = hits - a - h, late - offset - a - h
-    ok = (rest >= 0) & (rest <= n0) & (need >= 0) & (need < log_others.size)
-    terms = (
-        _log_combs(n, a)
-        + _log_combs(m, h)
-        + _log_combs(n0, np.clip(rest, 0, n0))
-        + log_others[np.clip(need, 0, log_others.size - 1)]
-    )
-    per_a = logsumexp(np.where(ok, terms, -np.inf), axis=1)
-    return float(min(1.0, np.exp(logsumexp(per_a[k:]) - logsumexp(per_a))))
 
 
 def holm(pvalues: Sequence[float]) -> list[float]:
@@ -428,6 +399,35 @@ def logistic_fit(
         if float(np.max(np.abs(scale * step), initial=0.0)) < tol:
             break
     return beta, current
+
+
+def cluster_score_test(
+    nuisance: Any, tested: Any, y: Any, clusters: Sequence[Hashable]
+) -> tuple[float, int, float, int]:
+    """(statistic, df, p, clusters): score test that the `tested` columns add nothing to a logistic regression
+    on the `nuisance` columns, with the variance taken from per-cluster sums of the score contributions
+    (cluster-robust, independence working model, small-sample factor G / (G - 1)), so rows that share a
+    cluster are not counted as independent evidence. The null model is a Firth fit, which stays finite when
+    a template's outcomes are all 0. One tested column: z = U / sqrt(V), p one-sided for a positive
+    coefficient, from Student t with G - 1 df. Several: U' V^-1 U against chi-square(df), two-sided."""
+    x0, target = np.asarray(nuisance, dtype=float), np.asarray(y, dtype=float)
+    x1 = np.asarray(tested, dtype=float).reshape(len(target), -1)
+    beta, _ = logistic_fit(x0, target, firth=True)
+    p = expit(x0 @ beta)
+    w = (p * (1 - p))[:, None]
+    # the tested columns with their weighted projection on the nuisance removed: the efficient score
+    x1 = x1 - x0 @ np.linalg.solve(x0.T @ (w * x0), x0.T @ (w * x1))
+    codes = _codes(clusters)
+    g = int(codes.max()) + 1
+    sums = np.zeros((g, x1.shape[1]))
+    np.add.at(sums, codes, x1 * (target - p)[:, None])
+    score, cov = sums.sum(axis=0), sums.T @ sums * g / (g - 1)
+    df = x1.shape[1]
+    if df == 1:
+        z = float(score[0] / np.sqrt(cov[0, 0])) if cov[0, 0] > 0 else math.nan
+        return z, 1, float(st.t.sf(z, g - 1)) if math.isfinite(z) else math.nan, g
+    statistic = float(score @ np.linalg.solve(cov, score))
+    return statistic, df, float(st.chi2.sf(statistic, df)), g
 
 
 def leave_one_group_out(x: Sequence[float] | None, y: Sequence[bool], groups: Sequence[Hashable]) -> list[float]:

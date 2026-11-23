@@ -15,6 +15,7 @@ from wf_core.models import Frozen
 
 from .detectors import DETECTOR_NAMES
 from .env import EnvOptions
+from .labels import LabelThresholds
 from .scripted import PolicyModel
 
 
@@ -32,6 +33,9 @@ class DesignSettings(Frozen):
     strict_share: float = 0.25
     variants: tuple[str | dict[str, Any], ...] = ("strict",)
     prereg_digest: str | None = None  # digest of the preregistered predictions, set before the first run
+    # The prediction test's N: the fewest cells (template x seed) any non-strict variant may get. A design
+    # below it is refused before a run whose outcomes the predictions score (analysis.achievable_n).
+    min_cells_per_variant: int = 0
 
 
 class DryRunSettings(Frozen):
@@ -78,6 +82,7 @@ class TrainConfig(Frozen):
     design: DesignSettings = DesignSettings()
     grpo: dict[str, Any]
     gates: GateSettings = GateSettings()
+    labels: LabelThresholds = LabelThresholds()  # preregistered label rules (margin, alpha, ...); in the digest
     dry_run: DryRunSettings = DryRunSettings()
 
     def env_options(self) -> EnvOptions:
