@@ -33,10 +33,19 @@ from typing import Any
 
 from .analysis import ShortDesign, achievable_n
 from .config import TrainConfig, load_config
-from .design import Manifest, check_complete, latin_design, load_manifest, save_manifest, single_variant_design
+from .design import (
+    Manifest,
+    check_complete,
+    latin_design,
+    load_manifest,
+    make_variant,
+    save_manifest,
+    single_variant_design,
+)
 from .env import EnvOptions, environment_name, make_env_factory
 from .gates import GateMonitor, base_gate
-from .preflight import Limits, measure, problems, summary
+from .opens import measured_opens
+from .preflight import Limits, behaviour_problems, measure, problems, summary
 from .rescore import rescore
 from .rewards import CellVerifierReward, detector_rewards, stop_rewards
 from .rollouts import Arm, Phase, RolloutRecorder, RolloutStore, require_unique
@@ -59,10 +68,13 @@ RESERVED_GRPO_KEYS = frozenset({"output_dir", "seed", "run_name", "reward_weight
 # ---------------------------------------------------------------- manifests
 
 
-def design_manifest(cfg: TrainConfig, world: World) -> Manifest:
-    """The design the config describes: a pure function of design_seed and the sets of variants and templates.
-    Only the multiplexed arm needs every variant in every seed; single-variant arms use its split and variants."""
+def design_manifest(cfg: TrainConfig, world: World, *, with_opens: bool = True) -> Manifest:
+    """The design the config describes: a pure function of design_seed and the sets of variants and templates,
+    with what each variant pays on each template measured against the world's verifiers (opens.py; `with_opens=False`
+    skips that when only the cell counts matter). Only the multiplexed arm needs every variant in every seed;
+    single-variant arms use its split, variants and measured matrix."""
     d = cfg.design
+    opens = measured_opens(world, [make_variant(v) for v in d.variants]) if with_opens else None
     return latin_design(
         world.templates,
         d.variants,
@@ -72,6 +84,7 @@ def design_manifest(cfg: TrainConfig, world: World) -> Manifest:
         strict_share=d.strict_share,
         prereg_digest=d.prereg_digest,
         complete=cfg.train_variant == "cell",
+        opens=opens,
     )
 
 
@@ -210,6 +223,14 @@ def reward_functions(
     return funcs, [1.0] + [0.0] * (len(funcs) - 1)
 
 
+def no_accelerator() -> bool:
+    """True on a CPU-only machine (no CUDA device and no Apple GPU)."""
+    import torch
+
+    mps = getattr(torch.backends, "mps", None)
+    return not torch.cuda.is_available() and not (mps is not None and mps.is_available())
+
+
 def grpo_kwargs(
     cfg: TrainConfig, out: Path, seed: int, weights: list[float], run_name: str | None = None
 ) -> dict[str, Any]:
@@ -221,8 +242,13 @@ def grpo_kwargs(
         raise ValueError(f"unknown GRPOConfig keys in {cfg.name}: {unknown}")
     if clash := sorted(RESERVED_GRPO_KEYS & set(cfg.grpo)):
         raise ValueError(f"set by the harness, not the config: {clash}")
+    grpo = dict(cfg.grpo)
+    if grpo.get("bf16") and no_accelerator():
+        # A machine with neither CUDA nor an Apple GPU only validates and rehearses (dry run, CI, analysis):
+        # transformers refuses bf16 there. Any GPU keeps the configured precision, and fails loudly without it.
+        grpo["bf16"] = False
     return {
-        **cfg.grpo,
+        **grpo,
         "output_dir": str(out),
         "seed": seed,
         "run_name": run_name or f"{cfg.name}-s{seed}",
@@ -377,7 +403,7 @@ def gate_report(cfg: TrainConfig, world: World, manifest: Manifest, out: Path) -
         raise ValueError("the base-sweep gate needs a strict variant in the design")
     records = [r for path in sorted((out / "base").rglob("rollouts.jsonl")) for r in RolloutStore(path)]
     records = [r for r in require_unique(records) if r.phase == "base"]  # the first sweep and any top-ups
-    rows = rescore(records, world, [manifest.variant(strict)], detectors=())
+    rows = rescore(records, world, [manifest.variant(strict)], detectors=(), signals=())
     g = grpo_args(cfg, out / "trl", manifest.seeds[0], [1.0]).num_generations
     report = base_gate(rows, strict=strict, templates=manifest.train_templates, g=g, settings=cfg.gates)
     return {"base_rollouts": len(records), **report}
@@ -433,8 +459,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if args.manifest or (args.analyze and pinned.exists()):  # the analysis reads the design the runs used
         design = load_manifest(args.manifest or pinned)
         given = True
-    else:
-        design, given = design_manifest(cfg, world), False
+    else:  # --check-design only counts cells, so it skips measuring what each variant pays
+        design, given = design_manifest(cfg, world, with_opens=not args.check_design), False
     target = cfg.design.min_cells_per_variant
     if args.check_design:
         print(json.dumps({"cells_per_variant": achievable_n(design), "min_cells_per_variant": target}, indent=2))
@@ -484,8 +510,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if top_up is not None:  # pooled with the first sweep: a new directory, never a rerun of OUT/base
         directory = directory / f"topup-{attempt}"
     context = context_report(cfg, world, manifest, grpo_args(cfg, directory, args.seed, [1.0]), offline=False)
-    if context["problems"]:
-        print("rs-train: the context pre-flight failed:\n  " + "\n  ".join(context["problems"]), file=sys.stderr)
+    if found := context["problems"] + behaviour_problems(world, all_tasks(world, manifest)):
+        print("rs-train: the pre-flight failed:\n  " + "\n  ".join(found), file=sys.stderr)
         return 1
     resumed = prepare_run_dir(out, directory, attempt=attempt, resume=args.resume, overwrite=args.overwrite)
     if resumed is not None:

@@ -1,5 +1,6 @@
 """Multiplexed design: Latin-square balance, determinism, ids, and the variant x shortcut matrix."""
 
+import dataclasses
 import json
 
 import pytest
@@ -18,8 +19,12 @@ from rs_train.design import (
 )
 from rs_train.detectors import DETECTOR_NAMES
 from rs_train.env import episode_for
-from rs_train.toy import SCRIPTS, toy_world
+from rs_train.opens import measured_opens, shortcut_library
+from rs_train.toy import ToyStubRegistry, toy_world
+from rs_verify.toy_specs import SHORTCUTS, shortcut_episode, toy_episode, toy_verifier
 from rstrain_helpers import rollout
+
+GOLDEN_REFUND = ("create_refund", {"order_id": "o1", "amount_cents": 5000})
 
 TEMPLATES = [f"t{i:02d}" for i in range(60)]
 VARIANTS = [
@@ -88,7 +93,7 @@ def test_manifest_round_trips_and_detects_edits(tmp_path):
     path = save_manifest(manifest, tmp_path / "manifest.json")
     assert load_manifest(path) == manifest
     body = json.loads(path.read_text())
-    body["runs"][0]["cells"][0]["variant"] = "strict"
+    body["runs"][0]["cells"][0]["variant"] = "edited"
     path.write_text(json.dumps(body))
     with pytest.raises(ValueError, match="digest"):
         load_manifest(path)
@@ -117,7 +122,12 @@ def test_variant_ids_follow_rs_verify_naming():
 def test_variants_are_sets_of_opened_shortcuts():
     full = make_variant("toy.refund_email.strict~count_at_least+ignore_order")
     assert full.flags == ("count_at_least", "ignore_order") and full.opens == ("duplicate_writes", "order_violation")
-    assert make_variant("status_only").opens == ("duplicate_writes", "partial_write", "side_effect_missing")
+    assert make_variant("status_only").opens == (
+        "duplicate_writes",
+        "partial_write",
+        "side_effect_missing",
+        "missing_write",
+    )
     assert make_variant("strict").kind == "strict" and make_variant("strict").opens == ()
     decoy = make_variant({"id": "decoy_subject", "kind": "decoy", "opens": []})
     assert decoy.flags == () and decoy.opens == ()
@@ -127,31 +137,111 @@ def test_variants_are_sets_of_opened_shortcuts():
 @pytest.mark.parametrize(
     "flags", [(), ("status_only",), ("trust_claim",), ("count_at_least", "ignore_order", "trust_claim")]
 )
-def test_stub_verifier_ids_parse_back_to_their_flags(flags):
+def test_toy_verifier_ids_parse_back_to_their_flags(flags):
     vid = toy_world().verifier("refund_email", make_variant(variant_id(flags))).id
     assert parse_verifier_id(vid) == ("toy.refund_email.strict", frozenset(flags))
 
 
-def reference_shortcuts(task_id: str) -> dict:
-    """One episode per shortcut, like rs-verify's references: no closing claim except the claim shortcut."""
-    out = {}
-    for name, script in SCRIPTS[task_id].items():
-        if name in DETECTOR_NAMES:
-            if name != "claim_without_write":
-                script = script.model_copy(update={"final_answer": None})
-            out[name] = episode_for(*rollout(task_id, script))
-    return out
+# The toy world's measured variant x shortcut matrix (opens.measured_opens against rs-verify's toy verifiers):
+# per task and flag, the detectors firing on the reference shortcuts the flag pays and strict rejects. Unlisted
+# flags pay nothing on that task.
+TOY_MATRIX = {
+    "close_ticket": {
+        "ignore_collateral": ("collateral_edits", "duplicate_writes"),  # other tasks' writes on top of the golden
+        "trust_claim": ("collateral_edits", "duplicate_writes", "claim_without_write"),
+        "ignore_values": ("partial_write",),  # t1 set to pending
+    },
+    "refund_approved": {
+        "ignore_collateral": ("collateral_edits", "duplicate_writes"),
+        "count_at_least": ("duplicate_writes",),
+        "status_only": ("duplicate_writes", "partial_write"),  # the refund retried, never the approval
+        "ignore_order": ("order_violation",),
+        "trust_claim": (
+            "collateral_edits", "duplicate_writes", "partial_write", "order_violation", "claim_without_write",
+            "missing_write", "overclaim",
+        ),
+        "ignore_authorization": ("duplicate_writes", "order_violation", "missing_write", "overclaim"),
+        "ignore_values": ("duplicate_writes", "partial_write"),
+    },
+    "refund_email": {
+        "ignore_collateral": ("collateral_edits", "duplicate_writes"),
+        "count_at_least": ("duplicate_writes",),
+        "status_only": ("duplicate_writes", "partial_write", "side_effect_missing", "overclaim"),
+        "ignore_order": ("order_violation",),
+        "trust_claim": (
+            "collateral_edits", "duplicate_writes", "partial_write", "order_violation", "claim_without_write",
+            "side_effect_missing", "overclaim", "wrong_target",
+        ),
+        "ignore_side_effects": ("duplicate_writes", "side_effect_missing", "overclaim"),
+        "loose_target": ("collateral_edits", "side_effect_missing", "overclaim", "wrong_target"),
+        "ignore_values": ("duplicate_writes", "partial_write"),
+    },
+}  # fmt: skip
 
 
-@pytest.mark.parametrize("flag", FLAG_ORDER)
-def test_declared_opens_match_the_measured_shortcut_matrix(flag):
-    """The rs-verify toy matrix: STATUS_ONLY also accepts duplicates and missing side effects."""
+def test_the_toy_world_grades_with_rs_verify_not_the_detector_stub():
+    """Finding #26: the toy registry used to be ToyStubVerifier, built from the detectors themselves."""
+    world = toy_world()
+    for flag, shortcut in SHORTCUTS.items():
+        episode = shortcut_episode(flag)
+        mine = world.verifier(shortcut.task_id, make_variant(flag.value))
+        assert mine.id == toy_verifier(shortcut.task_id, flag).id
+        assert mine.verify(episode) == toy_verifier(shortcut.task_id, flag).verify(episode)
+        assert (
+            mine.verify(episode).passed
+            and not world.verifier(shortcut.task_id, make_variant("strict")).verify(episode).passed
+        )
+    decoy = world.verifier("refund_email", make_variant({"id": "decoy_subject", "kind": "decoy", "opens": []}))
+    hello = toy_episode("refund_email", [GOLDEN_REFUND, ("send_email", {"customer_id": "c1", "subject": "Hello"})])
+    assert (
+        decoy.verify(hello).passed and not world.verifier("refund_email", make_variant("strict")).verify(hello).passed
+    )
+
+
+def test_measured_opens_on_the_toy_world_are_rs_verify_s_matrix():
+    """Findings #20/#30: what a flag pays is measured per template against the real verifiers, not declared per flag.
+    The declaration is a prior, wrong both ways: IGNORE_SIDE_EFFECTS and STATUS_ONLY declare a missing side effect
+    everywhere, but only refund_email has one; IGNORE_COLLATERAL pays duplicates on records the golden run does not
+    touch; STATUS_ONLY keeps the exact count of the approval it checks the status of, so it never pays the duplicate
+    approval request (it pays a retried refund)."""
+    world = toy_world()
+    variants = [make_variant("strict"), *(make_variant(flag) for flag in FLAG_ORDER)]
+    measured = measured_opens(world, variants)
+    for task_id, row in measured.items():
+        assert row["strict"] == ()
+        assert {v: o for v, o in row.items() if o} == TOY_MATRIX[task_id], task_id
+    assert (
+        "side_effect_missing" in FLAG_OPENS["ignore_side_effects"]
+        and "side_effect_missing" in FLAG_OPENS["status_only"]
+    )
+    assert all("side_effect_missing" not in measured[t]["status_only"] for t in ("close_ticket", "refund_approved"))
+    assert "duplicate_writes" not in FLAG_OPENS["ignore_collateral"]
+    twice = {"approval twice": shortcut_library(world, "refund_approved")["duplicate_writes"]}
+    strict = world.verifier("refund_approved", make_variant("strict"))
+    assert measure_opens(strict, world.verifier("refund_approved", make_variant("status_only")), twice) == ()
+    assert measure_opens(strict, world.verifier("refund_approved", make_variant("count_at_least")), twice) != ()
+
+
+def test_the_detector_stub_restates_the_prior_where_rs_verify_does_not():
+    """Finding #26: ToyStubVerifier (kept for unit tests) is built from the detectors and the declared prior, so a
+    matrix measured against it restates FLAG_OPENS: it pays STATUS_ONLY's declared duplicate approval request, which
+    rs-verify's STATUS_ONLY rejects (it keeps the exact count of the approval whose status it checks)."""
+    world = toy_world()
+    stub = dataclasses.replace(world, verifier=ToyStubRegistry(world.profiles))
+    twice = {"approval twice": shortcut_library(world, "refund_approved")["duplicate_writes"]}
+    for grader, paid in ((stub, ("approval twice",)), (world, ())):
+        strict = grader.verifier("refund_approved", make_variant("strict"))
+        assert measure_opens(strict, grader.verifier("refund_approved", make_variant("status_only")), twice) == paid
+
+
+def test_measure_opens_keeps_what_the_lenient_verifier_pays_and_strict_rejects():
     world, strict = toy_world(), make_variant("strict")
-    measured: set[str] = set()
-    for task_id in SCRIPTS:
-        strict_v, lenient_v = world.verifier(task_id, strict), world.verifier(task_id, make_variant(flag))
-        measured |= set(measure_opens(strict_v, lenient_v, reference_shortcuts(task_id)))
-    assert measured == set(FLAG_OPENS[flag])
+    library = shortcut_library(world, "refund_email")
+    paid = measure_opens(world.verifier("refund_email", strict), world.verifier("refund_email", strict), library)
+    assert paid == ()
+    lenient = world.verifier("refund_email", make_variant("ignore_side_effects"))
+    paid = measure_opens(world.verifier("refund_email", strict), lenient, library)
+    assert paid == ("edit:retry:1:send_email", "side_effect_missing")  # its rows are tolerated: a second email too
 
 
 def test_trust_claim_pays_any_shortcut_whose_answer_claims_success():

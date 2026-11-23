@@ -702,11 +702,14 @@ BUILDERS: dict[str, Callable[[sqlite3.Connection, Facts], Parts]] = {
 # ---------------------------------------------------------------- assembly and serialisation
 
 
-def build_spec(task_id: str) -> VerifierSpec:
+def build_spec(task_id: str, seed: int | None = None) -> VerifierSpec:
+    """The task's strict spec on its own world seed (what specs/<task_id>.json holds), or on `seed`: the builders read
+    every value from the world, so another seed gives the spec of that procedural instance (rs-world `load_task`)."""
+
     def parts(db: sqlite3.Connection) -> Parts:
         return BUILDERS[task_id](db, oracle_module(task_id).facts(db))
 
-    p = with_world(task_file(task_id).seed, parts)
+    p = with_world(task_file(task_id).seed if seed is None else seed, parts)
     return VerifierSpec(
         id=f"helpdesk.{task_id}.strict",
         task_id=task_id,

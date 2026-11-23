@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "rs-core",
+    "rs-verify",   # the toy world grades with rs-verify's toy verifiers (toy.py)
+    "rs-world",    # the helpdesk world and its graders: imported only by rs_train.helpdesk
+    "rs-suite",
     "pydantic>=2.9",
     "pyyaml>=6.0.1",
     "numpy>=1.26",
@@ -26,6 +29,9 @@ rs-train = "rs_train.train:main"
 
 [tool.uv.sources]
 rs-core = { workspace = true }
+rs-verify = { workspace = true }
+rs-world = { workspace = true }
+rs-suite = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]

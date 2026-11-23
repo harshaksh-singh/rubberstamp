@@ -1,8 +1,8 @@
 """What the harness needs from a world, in one object, and how a config names it.
 
 `world: toy` in a config loads the bundled toy world (rs_train.toy). Any other value is an import path
-`package.module:function` returning a `World`; that is where Track C's world and Track A's verifiers
-plug in later without this package importing them.
+`package.module:function` returning a `World`, such as `rs_train.helpdesk:world`, the helpdesk world and its
+graders (the only module of this package that imports rs-world and rs-suite).
 """
 
 from __future__ import annotations

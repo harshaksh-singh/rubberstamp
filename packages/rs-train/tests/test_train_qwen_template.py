@@ -3,15 +3,15 @@
 
 - the chat templates render the environment's tool schemas, TRL's `parse_response` turns a Qwen tool call
   back into an environment call, and a malformed call ends the rollout as a parse failure (toy world);
-- the helpdesk world's real prompts and golden paths fit the configured context (rs-world's 20 tasks and
-  oracles through preflight.py), and the old sizes did not.
+- the helpdesk world's real prompts and golden paths fit the configured context (the configured world,
+  rs_train.helpdesk: 20 tasks x 20 world seeds, through preflight.py), and the old sizes did not.
 """
 
 import pytest
 from rs_train.config import load_config
 from rs_train.env import EnvOptions, episode_for, make_env_factory
 from rs_train.preflight import Limits, measure, problems, summary
-from rs_train.scripted import Script, play, tool_names
+from rs_train.scripted import play, tool_names
 from rs_train.toy import toy_world
 from rs_train.train import grpo_kwargs
 from rstrain_helpers import CONFIGS, load_cached_tokenizer
@@ -71,20 +71,12 @@ def test_qwen_template_renders_the_tools_and_round_trips_a_call(model):
     assert episode.trajectory.stop == "error" and episode.trajectory.final_answer is None
 
 
-def helpdesk():
-    """rs-world's 20 tasks and their oracles' golden plans (the summary doubles as the final answer)."""
-    from rs_world.executor import WorldExecutor
-    from rs_world.tasks import golden, load_task, task_ids
+def helpdesk(seeds: tuple[int, ...] | None = None):
+    """The configured helpdesk world (every instance, or those of `seeds`): executor, tasks, golden scripts."""
+    from rs_train.helpdesk import world
 
-    tasks = [load_task(task_id) for task_id in task_ids()]
-    plans = {task.id: golden(task) for task in tasks}
-    scripts = {
-        task_id: Script(
-            name="golden", calls=tuple((tool, dict(args)) for tool, args in plan.calls), final_answer=plan.answer
-        )
-        for task_id, plan in plans.items()
-    }
-    return WorldExecutor(), tasks, scripts
+    w = world() if seeds is None else world(seeds)
+    return w.executor, list(w.tasks.values()), w.golden_scripts()
 
 
 # Before this change: research/64's "prompt <= 1.5k" sizes, and the 300 x 4-character tool-response cap.
@@ -98,7 +90,7 @@ OLD = {
 @pytest.mark.parametrize("name", ["smoke", "main"])
 def test_helpdesk_prompts_and_golden_paths_fit_the_configured_context(name, tmp_path):
     """Findings #3/#33/#34: every helpdesk prompt (2.56-2.65k tokens) was over smoke's whole 2,560-token
-    context, and main left honest paths about 2k tokens."""
+    context, and main left honest paths about 2k tokens. Measured on all 400 instances the configs train on."""
     cfg = load_config(CONFIGS / f"{name}.yaml")
     tokenizer = load_cached_tokenizer(cfg.model)
     executor, tasks, scripts = helpdesk()
@@ -120,17 +112,20 @@ def test_helpdesk_prompts_and_golden_paths_fit_the_configured_context(name, tmp_
     )
     assert problems(fits, limits) == []
     measured = summary(fits)
-    assert measured["tasks"] == 20 and 2500 < measured["prompt_tokens_min_median_max"][2] < 2700
+    assert measured["tasks"] == 400 and 2500 < measured["prompt_tokens_min_median_max"][2] < 2700
     assert measured["golden_calls_max"] == 7 and measured["longest_tool_tokens"] < cfg.env["max_response_tokens"]
     assert problems(fits, OLD[name].model_copy(update={"margin": cfg.golden_margin}))
 
 
-def test_the_old_response_cap_cut_a_golden_helpdesk_response():
-    """Finding #34: 300 tokens x 4 characters = 1,200 characters cut t05's list_tickets (1,329 characters)."""
-    executor, tasks, scripts = helpdesk()
+def test_the_old_response_caps_cut_a_golden_helpdesk_response():
+    """Finding #34: 300 tokens x 4 characters = 1,200 characters cut t05's list_tickets (1,329 characters on the
+    task's own seed); 768 x 1.8 = 1,382 characters then cut it on world seed 2 (1,597 characters), a procedural
+    instance. The configured 1,024 keeps both whole."""
+    executor, tasks, scripts = helpdesk((42, 2))
     cut = {}
     for options in (
         EnvOptions(max_response_tokens=300, chars_per_token=4),
+        EnvOptions(max_response_tokens=768, chars_per_token=1.8),
         load_config(CONFIGS / "main.yaml").env_options(),
     ):
         env = make_env_factory(executor, tasks, options)()
@@ -139,4 +134,8 @@ def test_the_old_response_cap_cut_a_golden_helpdesk_response():
             env.reset(task_id=task.id)
             replies = [m["content"] for m in play(env, scripts[task.id]) if m["role"] == "tool"]
             cut[options.max_response_tokens] += [task.id for r in replies if "...[truncated" in r]
-    assert cut == {300: ["t05_sla_breach_escalation"], 768: []}
+    assert cut == {
+        300: ["t05_sla_breach_escalation@42", "t05_sla_breach_escalation@2"],
+        768: ["t05_sla_breach_escalation@2"],
+        1024: [],
+    }

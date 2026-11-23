@@ -48,8 +48,11 @@ def read(path):
 
 @pytest.fixture(scope="module")
 def main_config(tmp_path_factory):
-    """main.yaml on the wide toy world, with a 64-rollout base sweep to keep the suite quick."""
-    return config_file(tmp_path_factory.mktemp("config"), "main", world=WIDE, base_samples=64)
+    """main.yaml on the wide toy world, with a 64-rollout base sweep to keep the suite quick. Its 11-variant design
+    gives some variants 3 cells, below the shipped target of 4 (test_train_analysis checks the refusal), so the
+    rehearsal lowers the target."""
+    directory = tmp_path_factory.mktemp("config")
+    return config_file(directory, "main", world=WIDE, base_samples=64, design={"min_cells_per_variant": 3})
 
 
 @pytest.fixture(scope="module")
@@ -175,7 +178,7 @@ def test_analysis_refuses_a_store_written_twice(main_run, main_config, tmp_path)
 
 
 def test_single_variant_dry_run_needs_a_strict_control_to_label_the_order_shortcut(tmp_path):
-    config = config_file(tmp_path, "smoke", tile_rows=True)  # the 3-template toy world, tiled to 4 prompts
+    config = config_file(tmp_path, "smoke", world="toy", tile_rows=True)  # 3 templates, tiled to 4 prompts
     assert (
         main(["--config", str(config), "--out", str(tmp_path / "out"), "--dry-run", "--train-variant", "ignore_order"])
         == 0
@@ -195,12 +198,14 @@ def test_single_variant_dry_run_needs_a_strict_control_to_label_the_order_shortc
 
 
 def test_the_shipped_configs_fail_fast_on_the_three_template_toy_world(tmp_path):
-    """Findings #4/#16/#32 and #18: the toy world's 2 training templates fill neither main's 9-slot design nor a
+    """Findings #4/#16/#32 and #18: the toy world's 2 training templates fill neither main's 13-slot design nor a
     4-prompt batch. TRL used to train 0 steps and exit 0; the design used to leave variants without cells."""
-    with pytest.raises(ValueError, match="2 training templates are fewer than the 9 slots"):
-        main(["--config", str(CONFIGS / "main.yaml"), "--out", str(tmp_path / "main"), "--dry-run"])
+    main_toy = config_file(tmp_path, "main", world="toy", design={"min_cells_per_variant": 0})
+    with pytest.raises(ValueError, match="2 training templates are fewer than the 13 slots"):
+        main(["--config", str(main_toy), "--out", str(tmp_path / "main"), "--dry-run"])
+    smoke_toy = config_file(tmp_path, "smoke", world="toy")
     with pytest.raises(ValueError, match="2 training rows, but each generation batch needs 4 distinct prompts"):
-        main(["--config", str(CONFIGS / "smoke.yaml"), "--out", str(tmp_path / "smoke"), "--dry-run"])
+        main(["--config", str(smoke_toy), "--out", str(tmp_path / "smoke"), "--dry-run"])
 
 
 def test_tiling_and_dropped_rows():
@@ -290,7 +295,7 @@ def test_smoke_config_matches_the_recipe(tmp_path):
     args = GRPOConfig(**grpo_kwargs(cfg, tmp_path, 0, [1.0]))
     assert args.num_generations == 8 and args.generation_batch_size == 32 and args.max_steps == 40
     # research/64's 6 iterations and 1,024 tokens cannot hold the helpdesk world's golden paths (pre-flight)
-    assert args.max_tool_calling_iterations == 12 and args.max_completion_length == 2560
+    assert args.max_tool_calling_iterations == 12 and args.max_completion_length == 2816
     assert args.vllm_max_model_length == 6144
     assert args.reward_weights == [1.0] and args.seed == 0 and args.run_name == "smoke-s0"
 
@@ -316,3 +321,13 @@ def test_config_typos_fail_before_any_gpu_time(tmp_path):
     reserved = cfg.model_copy(update={"grpo": {**cfg.grpo, "seed": 3}})
     with pytest.raises(ValueError, match="set by the harness"):
         grpo_kwargs(reserved, tmp_path, 0, [1.0])
+
+
+def test_a_cpu_only_machine_rehearses_without_bf16_and_a_gpu_keeps_it(tmp_path, monkeypatch):
+    """CI runs on CPU-only Linux, where transformers refuses bf16; the shipped configs train in bf16 on the GPU."""
+    cfg = load_config(CONFIGS / "main.yaml")
+    assert cfg.grpo["bf16"] is True
+    monkeypatch.setattr(train, "no_accelerator", lambda: True)
+    assert grpo_kwargs(cfg, tmp_path, 0, [1.0])["bf16"] is False
+    monkeypatch.setattr(train, "no_accelerator", lambda: False)
+    assert grpo_kwargs(cfg, tmp_path, 0, [1.0])["bf16"] is True
