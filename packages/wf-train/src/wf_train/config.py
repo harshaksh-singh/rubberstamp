@@ -35,10 +35,26 @@ class DesignSettings(Frozen):
 
 
 class DryRunSettings(Frozen):
-    steps: tuple[int, ...] = (0, 10, 20, 30, 40)  # checkpoints at which the scripted policy is sampled
-    group_size: int = 8  # rollouts per cell per checkpoint (G)
+    steps: tuple[int, ...] = (0, 10, 20, 30, 40)  # global steps whose generation batch the scripted policy plays
     eval_samples: int = 16  # held-out rollouts per template at the last checkpoint
     policy: PolicyModel = PolicyModel()
+
+
+class GateSettings(Frozen):
+    """Stop rules checked at every logged training step (gates.GateMonitor through trainer.GateCallback), and
+    the base-sweep go/no-go (`wf-train --gate`). Windows count logged steps; the configs log every step."""
+
+    zero_std_max: float = 0.6  # research/64 §3: more groups than this without reward variance -> SFT first
+    zero_std_window: int = 10
+    no_tool_call_steps: int = 5  # tools/call_frequency == 0 this many logged steps in a row
+    unparsed_max: float = 0.2  # research/64 §4: tool-call parse failures under 20%
+    unparsed_window: int = 5
+    step_time_max: float | None = 180.0  # seconds per optimizer step, median (the plan assumes 1.5-3 min at main)
+    step_time_window: int = 3
+    logp_diff_max: float | None = 0.5  # sampling/sampling_logp_difference/mean: vLLM vs trainer, per token
+    logp_diff_window: int = 3
+    base_pass_range: tuple[float, float] = (0.1, 0.7)  # research/64 §3: per-task strict pass@G in 10-70%
+    base_zero_variance_max: float = 0.6  # predicted share of all-equal groups, mean(p^G + (1 - p)^G)
 
 
 class TrainConfig(Frozen):
@@ -52,9 +68,16 @@ class TrainConfig(Frozen):
     log_verifiers: tuple[str, ...] = ("strict",)  # logged at weight 0 next to the training reward
     detectors: tuple[str, ...] = DETECTOR_NAMES  # logged at weight 0
     keep_states: bool = False  # store both snapshots in rollouts.jsonl (else rescoring replays)
-    base_samples: int = 64  # base-sweep rollouts per template (>= 59 so "0 of n" bounds p0 below 5%)
+    # Base-sweep rollouts per template, spread over its instances: base_samples / G rows of G generations
+    # each, so it must be a multiple of num_generations.
+    base_samples: int = 64
+    # Repeat a seed's training rows until they fill whole generation batches. Only for tiny worlds with fewer
+    # rows than prompts per batch, which otherwise give TRL an empty sampler (0 training steps).
+    tile_rows: bool = False
+    golden_margin: float = 1.5  # pre-flight: golden tokens and calls x this must fit the completion budget
     design: DesignSettings = DesignSettings()
     grpo: dict[str, Any]
+    gates: GateSettings = GateSettings()
     dry_run: DryRunSettings = DryRunSettings()
 
     def env_options(self) -> EnvOptions:

@@ -14,7 +14,9 @@ Assignment (a cyclic Latin rectangle): the variants are laid on a cycle -- non-s
 strict copies spaced evenly -- such that any `len(seeds)` consecutive slots hold distinct variants. The
 template at (shuffled) position j gets slot (j + s) in the s-th seed. Hence: distinct variants per
 template across seeds, per-seed counts within one of each other for single-copy variants, and the whole
-design is a pure function of `design_seed`.
+design is a pure function of `design_seed` and the SET of variants and templates (both are put in a
+canonical order before shuffling). A seed only covers every slot when there are at least as many training
+templates as slots; otherwise some variants would get no cell in that seed, so `latin_design` refuses.
 """
 
 from __future__ import annotations
@@ -147,7 +149,7 @@ def cell_id(template: str, variant: str) -> str:
 
 def variant_cycle(variants: Sequence[Variant], strict_share: float, window: int, rng: random.Random) -> list[str]:
     strict = [v.id for v in variants if v.kind == "strict"]
-    others = [v.id for v in variants if v.kind != "strict"]
+    others = sorted(v.id for v in variants if v.kind != "strict")  # canonical before the shuffle
     if len(strict) > 1:
         raise ValueError(f"expected at most one strict variant, got {strict}")
     rng.shuffle(others)
@@ -176,9 +178,12 @@ def latin_design(
     heldout_fraction: float = 0.2,
     strict_share: float = 0.25,
     prereg_digest: str | None = None,
+    complete: bool = True,
 ) -> Manifest:
+    """The multiplexed design. `complete=False` skips the every-variant-in-every-seed check, for arms that
+    grade every template with one variant (single_variant_design) and only need the split and variant list."""
     rng = random.Random(design_seed)
-    chosen = [make_variant(v) for v in variants]
+    chosen = sorted((make_variant(v) for v in variants), key=lambda v: (v.kind != "strict", v.id))
     if len({v.id for v in chosen}) != len(chosen):
         raise ValueError("variant ids must be unique")
     order = sorted(set(templates))
@@ -192,7 +197,7 @@ def latin_design(
         picks = [(t, cycle[(j + s) % len(cycle)]) for j, t in enumerate(train)]
         cells = tuple(Cell(cell_id=cell_id(t, v), template=t, variant=v) for t, v in sorted(picks))
         runs.append(RunPlan(seed=seed, cells=cells))
-    return Manifest(
+    manifest = Manifest(
         design_seed=design_seed,
         seeds=tuple(seeds),
         strict_share=strict_share,
@@ -201,6 +206,31 @@ def latin_design(
         variants=tuple(chosen),
         runs=tuple(runs),
         prereg_digest=prereg_digest,
+    )
+    return check_complete(manifest, slots=len(cycle)) if complete else manifest
+
+
+def missing_variants(manifest: Manifest) -> dict[int, list[str]]:
+    """Per seed, the variants that have no cell in that seed's run."""
+    return {
+        run.seed: [v.id for v in manifest.variants if v.id not in {c.variant for c in run.cells}]
+        for run in manifest.runs
+    }
+
+
+def check_complete(manifest: Manifest, slots: int | None = None) -> Manifest:
+    """The manifest, or ValueError when some variant has no cell in some seed (its preregistered predictions
+    could never be scored there). A seed covers as many consecutive cycle slots as there are training
+    templates, so every variant needs at least as many templates as the cycle has slots."""
+    missing = {seed: ids for seed, ids in missing_variants(manifest).items() if ids}
+    if not missing:
+        return manifest
+    n = len(manifest.train_templates)
+    cause = f"are fewer than the {slots} slots of the variant cycle" if slots else "leave variants out"
+    where = "; ".join(f"seed {seed}: {', '.join(ids)}" for seed, ids in sorted(missing.items()))
+    raise ValueError(
+        f"{n} training templates {cause}, so these variants get no cell: {where}. "
+        f"Use at most {n} slots (fewer variants or a lower strict_share) or add templates."
     )
 
 
@@ -221,7 +251,8 @@ def single_variant_design(manifest: Manifest, variant: str) -> Manifest:
 
 
 def balance(manifest: Manifest) -> dict[str, Any]:
-    """Per-seed variant counts, per-template variant lists and the two balance properties."""
+    """Per-seed variant counts, per-template variant lists, the two balance properties, and per seed the
+    fewest cells any variant got (`min_cells`, 0 when one is `missing`)."""
     per_seed = {r.seed: Counter(c.variant for c in r.cells) for r in manifest.runs}
     per_template: dict[str, list[str]] = {}
     for _, cell in manifest.cells():
@@ -233,6 +264,8 @@ def balance(manifest: Manifest) -> dict[str, Any]:
         "per_template": per_template,
         "distinct_per_template": all(len(set(vs)) == len(vs) for vs in per_template.values()),
         "max_spread": spread if single else 0,
+        "min_cells": {seed: min((c[v.id] for v in manifest.variants), default=0) for seed, c in per_seed.items()},
+        "missing": {seed: ids for seed, ids in missing_variants(manifest).items() if ids},
         "strict_share": {
             seed: sum(n for v, n in c.items() if manifest.variant(v).kind == "strict") / max(1, sum(c.values()))
             for seed, c in per_seed.items()

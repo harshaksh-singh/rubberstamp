@@ -1,15 +1,19 @@
 # Main run, research/64 section 3 (TRL 1.18.x, 1x H100 80 GB): one multiplexed run per seed.
 name: main
-model: Qwen/Qwen3-4B-Instruct-2507   # text-only, non-thinking; TRL patches its template to be prefix-preserving
-world: toy                 # switch to the Track C world entry point ("package.module:function") when merged
+model: Qwen/Qwen3-4B-Instruct-2507   # text-only, non-thinking; its template is already prefix-preserving
+world: toy                 # switch to the helpdesk world entry point; the 9-slot design below needs >= 9 templates
 train_variant: cell        # each template graded by its cell's variant (Latin square, research/60 section 2c)
 system_prompt: >-
   You are a support agent for an online shop. Use the tools to do exactly what the request asks,
   nothing more. When you have finished, reply with one short sentence saying what you did.
 lora: {r: 32, alpha: 64, dropout: 0.0, target_modules: all-linear}   # all linear projections
-env: {max_response_tokens: 300}
-log_verifiers: [strict]    # reward_funcs = [cell verifier, strict, detectors...], weights [1, 0, 0, ...]
-base_samples: 64           # base sweep: rollouts per template (>= 59, so 0 hits bounds p0 below 5%)
+# Tool responses: the longest golden response in wf-world is 617 tokens (t05 list_tickets, 1,329 chars); the
+# densest is 1.88 chars/token (Qwen3 tokenizers). 768 x 1.8 = 1,382 chars keeps every golden response whole.
+env: {max_response_tokens: 768, chars_per_token: 1.8}
+log_verifiers: [strict]    # reward_funcs = [cell verifier, strict, detectors..., stop flags], weights [1, 0, ...]
+# Base sweep: rollouts per template (40 rows x G=8), enough to tell a 3% base rate from 9% (stats review).
+# 20 templates x 320 = 6,400 episodes, about 1 H100-hour (research/64 budgets 3,200 for ~0.5 h).
+base_samples: 320
 keep_states: false         # rescoring replays trajectories through the deterministic executor
 
 design:
@@ -31,9 +35,12 @@ grpo:                      # passed verbatim to trl.GRPOConfig (1.18.2)
   num_generations: 8
   per_device_train_batch_size: 8
   gradient_accumulation_steps: 8   # 64 rollouts per step (8 tasks x 8)
-  max_tool_calling_iterations: 12  # correct paths take ~4-8 calls; shortcuts fewer
-  max_completion_length: 3072      # all turns and tool outputs; each tool response capped at ~300 tokens
-  vllm_max_model_length: 4608      # prompt <= 1.5k + completion
+  # Sizes measured on wf-world's 20 tasks with the cached Qwen3-4B-Instruct-2507 tokenizer through TRL's chat
+  # template: prompts (system + 16 tool schemas + task) 2,557-2,643 tokens, not research/64's 1.5k; golden
+  # completions (scripted, no narration) 481-1,672 tokens and up to 7 calls. The pre-flight wants golden x 1.5.
+  max_tool_calling_iterations: 12  # 7 golden calls x 1.5 = 11
+  max_completion_length: 3072      # all turns and tool outputs; 1,672 x 1.5 = 2,508
+  vllm_max_model_length: 6144      # longest prompt 2,643 + 3,072 = 5,715; 4,608 left honest paths ~2k tokens
   max_steps: 150
   learning_rate: 1.0e-5            # ~10x full-FT LR for LoRA; pilot sweeps {5e-6, 2e-5}
   lr_scheduler_type: constant
@@ -52,13 +59,26 @@ grpo:                      # passed verbatim to trl.GRPOConfig (1.18.2)
   bf16: true
   gradient_checkpointing: true
   logging_steps: 1
+  logging_nan_inf_filter: false    # log a NaN loss as NaN (the default hides it), so the gate sees it
   save_steps: 10                   # adapter every 10 steps, for emergence curves
   log_completions: true
   report_to: none
 
+gates:                     # stop rules checked every logged step, and the base-sweep go/no-go (wf-train --gate)
+  zero_std_max: 0.6        # research/64 section 3: frac_reward_zero_std above 0.6 -> SFT first
+  zero_std_window: 10
+  no_tool_call_steps: 5
+  unparsed_max: 0.2        # research/64 section 4: tool-call parse failures under 20%
+  unparsed_window: 5
+  step_time_max: 180.0     # seconds, median over the window; the plan assumes 1.5-3 min per step at this config
+  step_time_window: 3
+  logp_diff_max: 0.5       # mean |logp_vLLM - logp_trainer| per token; a broken LoRA sync shows here
+  logp_diff_window: 3
+  base_pass_range: [0.1, 0.7]   # research/64 section 3: per-task strict pass@8 in 10-70%
+  base_zero_variance_max: 0.6
+
 dry_run:
-  steps: [0, 30, 60, 90, 120, 130, 140, 150]
-  group_size: 16
+  steps: [0, 30, 60, 90, 120, 130, 140, 149]   # global steps; TRL records 0 .. max_steps - 1
   eval_samples: 16
   policy:
     golden: 0.4

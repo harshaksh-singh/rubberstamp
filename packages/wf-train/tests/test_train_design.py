@@ -36,6 +36,7 @@ def test_latin_design_is_balanced():
     assert report["distinct_per_template"]  # a template meets a different variant in every seed
     assert all(len(vs) == 3 for vs in report["per_template"].values())
     assert report["max_spread"] <= 1  # per seed, single-copy variants are used equally often (+-1)
+    assert report["missing"] == {} and all(n >= 1 for n in report["min_cells"].values())
     assert all(0.18 <= share <= 0.32 for share in report["strict_share"].values())  # about a quarter strict
     assert len(manifest.heldout_templates) == 12
     assert set(manifest.heldout_templates).isdisjoint(manifest.train_templates)
@@ -50,6 +51,27 @@ def test_latin_design_is_a_pure_function_of_its_seed():
     b = latin_design(list(reversed(TEMPLATES)), VARIANTS, design_seed=3)
     assert a == b and a.digest() == b.digest()
     assert latin_design(TEMPLATES, VARIANTS, design_seed=4).digest() != a.digest()
+
+
+def test_latin_design_does_not_depend_on_the_order_variants_are_listed_in():
+    """Finding #24: reordering the config's variant list used to reassign most cells."""
+    assert latin_design(TEMPLATES, list(reversed(VARIANTS))).digest() == latin_design(TEMPLATES, VARIANTS).digest()
+
+
+SIXTEEN = [{"id": "strict", "kind": "strict"}] + [{"id": f"v{i:02d}", "opens": ["partial_write"]} for i in range(15)]
+
+
+def test_fewer_training_templates_than_cycle_slots_are_refused():
+    """Finding #18: 13 training templates for a 20-slot cycle (15 variants + 5 strict copies) left some
+    preregistered variants without a cell in a seed, and balance() still passed."""
+    templates = [f"t{i:02d}" for i in range(16)]
+    with pytest.raises(ValueError, match=r"13 training templates are fewer than the 20 slots") as raised:
+        latin_design(templates, SIXTEEN)
+    assert "seed 0:" in str(raised.value) and "seed 2:" in str(raised.value)
+    report = balance(latin_design(templates, SIXTEEN, complete=False))
+    assert set(report["missing"]) == {0, 1, 2} and set(report["min_cells"].values()) == {0}
+    assert report["max_spread"] == 1  # what the old report showed: a 0-vs-1 count looked balanced
+    assert latin_design([f"t{i:02d}" for i in range(25)], SIXTEEN).train_templates  # 20 training templates fit
 
 
 def test_impossible_designs_are_refused():

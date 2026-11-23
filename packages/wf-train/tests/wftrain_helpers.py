@@ -7,18 +7,54 @@ lenient stub that only looks at the target row's status.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import yaml
 from wf_core.diff import snapshot_digest
 from wf_core.models import Check, Episode, Verdict
 from wf_core.testing.toyworld import SCHEMA, TASKS, ToyExecutor, golden_calls
 from wf_train.env import LoopholeEnv, make_env_factory
 from wf_train.scripted import Script, play
-from wf_train.toy import SCRIPTS
+from wf_train.toy import SCRIPTS, toy_world
+from wf_train.world import World
 
 CONFIGS = Path(__file__).parents[1] / "configs"
+WIDE = "wftrain_helpers:wide_toy_world"
+
+
+def wide_toy_world() -> World:
+    """The toy world with its three tasks spread over 20 template ids, like the helpdesk world's 20 tasks: the
+    shipped designs then fit (16 training templates for main.yaml's 9 cycle slots, 16 rows for 4 or 8 prompts
+    per step)."""
+    world = toy_world()
+    tasks = sorted(world.tasks)
+    return dataclasses.replace(world, templates={f"{tasks[i % 3]}-{i:02d}": (tasks[i % 3],) for i in range(20)})
+
+
+def load_cached_tokenizer(model: str):
+    """The model's tokenizer from the local Hugging Face cache (files only, no weights), or skip the test."""
+    import pytest
+    from huggingface_hub import try_to_load_from_cache
+    from transformers import AutoTokenizer
+
+    if not isinstance(try_to_load_from_cache(model, "tokenizer_config.json"), str):
+        pytest.skip(f"{model} tokenizer is not in the local Hugging Face cache")
+    return AutoTokenizer.from_pretrained(model, local_files_only=True)
+
+
+def config_file(directory: Path, name: str, **changes: Any) -> Path:
+    """A copy of configs/<name>.yaml with top-level keys replaced (`grpo`/`gates` entries are merged)."""
+    body = yaml.safe_load((CONFIGS / f"{name}.yaml").read_text())
+    for key, value in changes.items():
+        body[key] = {**body.get(key, {}), **value} if key in ("grpo", "gates", "design") else value
+    path = directory / f"{name}-test.yaml"
+    path.write_text(yaml.safe_dump(body))
+    return path
+
+
 GOLDEN_DIGEST = {t: snapshot_digest(ToyExecutor().run(TASKS[t], golden_calls(t)).final, SCHEMA) for t in TASKS}
 TARGET = {
     "refund_email": ("orders", "o1", "refunded"),

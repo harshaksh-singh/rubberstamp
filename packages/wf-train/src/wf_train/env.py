@@ -11,6 +11,11 @@ The contract, read from the installed trl 1.18.2 (`trl/trainer/grpo_trainer.py`)
   A returned string is appended to the last user message; we return None because the row holds the prompt.
 - `_tool_call_loop` calls `method(**arguments)` and sends `str(result)` back as the tool message. An
   exception becomes `{"error": str(e)}` and counts in the `tools/failure_frequency` metric.
+- A tool call TRL cannot parse (`parse_response` falls back to plain text, chat_template_utils.py) never
+  reaches the loop and is counted nowhere: the turn just ends the rollout with the markup as its text.
+  `ending` therefore treats a last turn that still holds tool-call markup as a parse failure.
+- The loop also ends with a turn whose tool calls never ran (`max_tool_calling_iterations`, or the next
+  tool output would overflow the token budget): that turn is narration, not an answer.
 - `_calculate_rewards` passes the instances to every reward function as `environments=`, aligned with
   `completions`; `episode_for(env, completion)` turns one of them into a wf_core Episode.
 
@@ -34,6 +39,8 @@ from wf_core.protocols import Executor
 
 RESERVED = frozenset({"reset", "get_reward"})
 REJECTED = "rejected: "  # error prefix of malformed calls, which never reached the world
+TOOL_CALL_MARKER = "<tool_call>"  # Qwen's tag; TRL's parse_response leaves it in the text of a malformed call
+TRUNCATED = " ...[truncated "  # what `_cap` appends to a tool response it cut
 Stop = Literal["done", "max_steps", "error", "budget"]
 JSON_TYPES: dict[str, type] = {
     "string": str,
@@ -46,12 +53,25 @@ JSON_TYPES: dict[str, type] = {
 
 
 @dataclass(frozen=True)
+class AnswerChannel:
+    """A tool whose argument is the episode's answer, e.g. submit_resolution(summary=...): the final answer is
+    that argument of the last successful call, and chat after it is not the answer."""
+
+    tool: str
+    arg: str
+
+
+@dataclass(frozen=True)
 class EnvOptions:
     max_response_tokens: int = 300  # recipe: cap each tool response at about 300 tokens
-    chars_per_token: int = 4  # rough size of a token in JSON/English; avoids a tokenizer dependency here
+    # Characters per token of the densest tool output measured: 1.88 for the helpdesk world's JSON with the
+    # Qwen3 tokenizers (wf-world golden runs). Below that, the cap holds in tokens without a tokenizer here.
+    chars_per_token: float = 1.8
     task_key: str = "task_id"  # dataset column that names the task
     agent_id: str = "policy"
     raise_on_world_error: bool = False  # True: world errors also count in tools/failure_frequency
+    tool_call_marker: str = TOOL_CALL_MARKER
+    answer: AnswerChannel | None = None  # set from World.answer by train.env_factory
 
 
 def tool_params(spec: ToolSpec) -> tuple[dict[str, dict[str, Any]], tuple[str, ...]]:
@@ -134,6 +154,10 @@ class LoopholeEnv:
         """False if replaying earlier calls ever gave different results (a non-deterministic world)."""
         return self._replay_ok
 
+    @property
+    def options(self) -> EnvOptions:
+        return self._options
+
     # ------------------------------------------------------------ internals
 
     def _require(self) -> Episode:
@@ -167,10 +191,10 @@ class LoopholeEnv:
         return self._cap(json.dumps(payload, ensure_ascii=False, default=str))
 
     def _cap(self, text: str) -> str:
-        limit = self._options.max_response_tokens * self._options.chars_per_token
+        limit = int(self._options.max_response_tokens * self._options.chars_per_token)
         if len(text) <= limit:
             return text
-        return f"{text[:limit]} ...[truncated {len(text) - limit} chars]"
+        return f"{text[:limit]}{TRUNCATED}{len(text) - limit} chars]"
 
     def _trajectory(self, final_answer: str | None, stop: Stop) -> Trajectory:
         task = self._require().task
@@ -288,25 +312,44 @@ def _text(content: Any) -> str | None:
     return "".join(part.get("text", "") for part in content if isinstance(part, dict))
 
 
-def final_answer(completion: Any) -> str | None:
-    """The last assistant message's text (a TRL completion is a list of messages, or a string)."""
+@dataclass(frozen=True)
+class Ending:
+    """How a rollout ended, read from its last assistant turn (a TRL completion is a list of messages)."""
+
+    stop: Stop  # "done", "max_steps" (cut off with tool calls pending) or "error" (unparsed tool call)
+    text: str | None  # that turn's text
+
+    @property
+    def answer(self) -> str | None:
+        """The turn's text when it ended the rollout cleanly; a cut-off or unparsed turn is not an answer."""
+        return self.text if self.stop == "done" else None
+
+
+def ending(completion: Any, marker: str = TOOL_CALL_MARKER) -> Ending:
+    """How the rollout ended (see the module docstring for why each case is what it is)."""
     if isinstance(completion, str):
-        return completion
-    for message in reversed(completion or []):
-        if message.get("role") == "assistant":
-            return _text(message.get("content"))
-    return None
+        last: dict[str, Any] | None = {"role": "assistant", "content": completion}
+    else:
+        last = next((m for m in reversed(completion or []) if m.get("role") == "assistant"), None)
+    if last is None:
+        return Ending("done", None)
+    text = _text(last.get("content"))
+    if last.get("tool_calls"):
+        return Ending("max_steps", text)
+    if marker and marker in (text or ""):
+        return Ending("error", text)
+    return Ending("done", text)
 
 
-def stop_reason(completion: Any) -> Literal["done", "max_steps"]:
-    """`max_steps` when the rollout ended on unexecuted tool calls (iteration cap or length limit)."""
-    if isinstance(completion, list):
-        for message in reversed(completion):
-            if message.get("role") == "assistant":
-                return "max_steps" if message.get("tool_calls") else "done"
-    return "done"
+def channel_answer(calls: Iterable[ToolCall], channel: AnswerChannel) -> str | None:
+    """The channel argument of the last successful call to the channel tool, or None if it never succeeded."""
+    value = next((c.args.get(channel.arg) for c in reversed(tuple(calls)) if c.tool == channel.tool and c.ok), None)
+    return None if value is None else str(value)
 
 
 def episode_for(env: LoopholeEnv, completion: Any) -> Episode:
     """The wf_core Episode of one finished rollout, as reward functions see it."""
-    return env._episode(final_answer(completion), stop_reason(completion))
+    end = ending(completion, env.options.tool_call_marker)
+    channel = env.options.answer
+    answer = channel_answer(env._records, channel) if channel is not None else end.answer
+    return env._episode(answer, end.stop)
