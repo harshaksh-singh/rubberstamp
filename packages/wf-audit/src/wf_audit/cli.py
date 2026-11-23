@@ -3,7 +3,7 @@
 wf-audit sweep --world toy --out results/audit/toy
 wf-audit sweep --world toy --out results/audit/toy --only strict,accepts_duplicates
 wf-audit sweep --world toy --out /tmp/a --preset extended    # plus the loophole families
-wf-audit sweep --world toy --out /tmp/a --preset full        # plus the schema families
+wf-audit sweep --world toy --out /tmp/a --preset full        # plus the schema and repeat families
 wf-audit scorecard results/audit/toy
 """
 
@@ -32,7 +32,7 @@ def _parser() -> argparse.ArgumentParser:
         "--preset",
         choices=PRESETS,
         default="default",
-        help="family set (extended: + loophole families; full: extended + schema families)",
+        help="family set (extended: + loophole families; full: extended + schema and repeat families)",
     )
     sw.add_argument("--families", help="comma-separated family ids or kinds to run, e.g. field_coverage (default: all)")
     sw.add_argument("--families-module", help="module whose FAMILIES tuple is added to the preset")

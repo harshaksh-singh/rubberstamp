@@ -8,7 +8,16 @@ import pytest
 from openadapt_flow.verifier_audit import AuditConfig, Call, CallKind, run_audit
 from openadapt_flow.verifier_audit.families import FamilyContext, Polarity, Refusal
 from openadapt_flow.verifier_audit.families import wrong_value as openadapt_wrong_value
-from wf_audit import SCHEMA_KINDS, audit_features, family_kind, family_preset, schema_families, sweep, toy_world
+from wf_audit import (
+    REPEAT_KIND,
+    SCHEMA_KINDS,
+    audit_features,
+    family_kind,
+    family_preset,
+    schema_families,
+    sweep,
+    toy_world,
+)
 from wf_audit.cli import main
 from wf_audit.domains import accepts, alternatives, arguments, extra_values, fill_values, value_schema
 from wf_audit.families import (
@@ -546,12 +555,13 @@ def test_extra_field_through_the_runner(fields):
 # ---------------------------------------------------------------- preset, sweep outputs, CLI
 
 
-def test_full_preset_is_extended_plus_the_schema_families(world):
+def test_full_preset_is_extended_plus_the_schema_families_and_the_repeat_family(world):
     extended = [f.id for f in family_preset("extended", world)]
     full = [f.id for f in family_preset("full", world)]
+    schema = [f.id for f in schema_families(world)]
     assert full[: len(extended)] == extended
-    assert full[len(extended) :] == [f.id for f in schema_families(world)]
-    assert {family_kind(f) for f in full[len(extended) :]} == set(SCHEMA_KINDS)
+    assert full[len(extended) :] == [*schema, REPEAT_KIND]  # the toy world declares no repeatable create
+    assert {family_kind(f) for f in schema} == set(SCHEMA_KINDS)
     assert family_kind("field_coverage:update_ticket.priority") == "field_coverage"
     assert family_kind("duplicate") == "duplicate"
 
@@ -592,7 +602,7 @@ def test_sweep_writes_audit_features_and_per_slot_tables(world, tmp_path):
         "survival": 1.0,
     }
     md = (out / "SCORECARD.md").read_text()
-    assert "## Schema families, per slot" in md and "### schema_collateral" in md
+    assert "## Families per slot" in md and "### schema_collateral" in md
     assert "| ignores_collateral | **3/3** | **3/3** | **2/2** | **2/2** |" in md
     assert "| extra_field (FA) |" in md  # a kind without a slot stays in the main table
     run_card = json.loads((out / "run_card.json").read_text())

@@ -28,7 +28,8 @@
     "schema_collateral:request_approval",
     "schema_collateral:send_email",
     "schema_collateral:set_ticket_status",
-    "extra_field"
+    "extra_field",
+    "repeat_existing"
   ],
   "declarations": {
     "order_constraints": {
@@ -49,7 +50,9 @@
       "send_email": [
         "subject"
       ]
-    }
+    },
+    "repeatable_creates": {},
+    "existing_records": {}
   },
   "tool_schemas": {
     "create_refund": "263e8d8b12d0ded8",
