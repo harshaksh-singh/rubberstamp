@@ -3,6 +3,7 @@
 wf-audit sweep --world toy --out results/audit/toy
 wf-audit sweep --world toy --out results/audit/toy --only strict,accepts_duplicates
 wf-audit sweep --world toy --out /tmp/a --preset extended    # plus the loophole families
+wf-audit sweep --world toy --out /tmp/a --preset full        # plus the schema families
 wf-audit scorecard results/audit/toy
 """
 
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from openadapt_flow.verifier_audit.families import load_families
 
-from .families import PRESETS, family_preset
+from .families import PRESETS, family_kind, family_preset
 from .sweep import render_scorecard, scorecard, sweep
 from .worlds import DEFAULT_VARIANTS, WORLDS, load_variants, load_world
 
@@ -27,8 +28,13 @@ def _parser() -> argparse.ArgumentParser:
     sw.add_argument("--out", type=Path, required=True)
     sw.add_argument("--variants", help="module:function returning {variant: Verifier} (default: the world's set)")
     sw.add_argument("--only", help="comma-separated variant names to audit")
-    sw.add_argument("--preset", choices=PRESETS, default="default", help="family set (extended: + loophole families)")
-    sw.add_argument("--families", help="comma-separated family ids to run (default: all)")
+    sw.add_argument(
+        "--preset",
+        choices=PRESETS,
+        default="default",
+        help="family set (extended: + loophole families; full: extended + schema families)",
+    )
+    sw.add_argument("--families", help="comma-separated family ids or kinds to run, e.g. field_coverage (default: all)")
     sw.add_argument("--families-module", help="module whose FAMILIES tuple is added to the preset")
     sw.add_argument("--max-candidates", type=int, default=6)
     sw.add_argument("--single-replay", action="store_true", help="score the census replay (halves replays)")
@@ -58,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         families += load_families(args.families_module)
     if args.families:
         wanted_families = set(args.families.split(","))
-        families = tuple(f for f in families if f.id in wanted_families)
+        families = tuple(f for f in families if {f.id, family_kind(f.id)} & wanted_families)
     log = None if args.quiet else (lambda msg: print(msg, file=sys.stderr, flush=True))
     out = sweep(
         variants,
