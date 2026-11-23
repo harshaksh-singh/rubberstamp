@@ -26,7 +26,7 @@ Data flow:
 2. `lenient_verifier(spec, SCHEMA, flag)` -> `Variant`.
 3. `Variant` -> the validation tests, `matrix.py`, and `rs_audit.sweep(variants(), world())`.
 
-## Interview Q&A
+## Questions and answers
 
 1. **Why generate the specs from the world instead of writing the JSON by hand?**
    A spec is full of seeded values: ids, amounts, dates, the next approval id. Copied by hand, they go stale at the

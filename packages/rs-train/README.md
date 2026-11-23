@@ -25,7 +25,7 @@ contract check and the context pre-flight do.
    signature and a Google-style docstring, so `transformers.utils.get_json_schema` renders the tool
    schema TRL puts in the prompt. Each instance holds its own call list. A tool call replays the calls
    so far through `executor.run` (the Executor protocol only offers deterministic replay), records the
-   real result, and returns JSON capped at `max_response_tokens` (768 in the configs) at a measured 1.8
+   real result, and returns JSON capped at `max_response_tokens` (1,024 in the configs) at a measured 1.8
    characters per token, so the cap holds in tokens without a tokenizer. World errors go back to the
    model as `{"error": ...}`. Malformed calls (missing, unknown or mistyped arguments, or a tool the task
    lacks) raise, which TRL counts in `tools/failure_frequency`. They are recorded with an error starting
@@ -382,7 +382,7 @@ uv run rs-train --config packages/rs-train/configs/smoke.yaml --out $D/strict --
 uv run rs-train --config packages/rs-train/configs/smoke.yaml --out $D/strict --gate      # exit 1: no-go
 ```
 
-The gate prints per-task strict pass@8 and the predicted zero-variance share (`$D/strict/base_gate.json`).
+The gate prints per-template strict pass@8 (a template's instances pooled) and the predicted zero-variance share (`$D/strict/base_gate.json`).
 **No-go**: tasks outside 10–70% (drop them, make them easier or harder) or a share above 0.6 (an SFT warm
 start first, research/64 §3). Do not train until it passes.
 

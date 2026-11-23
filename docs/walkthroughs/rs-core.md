@@ -11,7 +11,7 @@
 - `testing/toyworld.py` — a dict-backed world (orders, refunds, approvals, tickets, emails, audit log) with 3 tasks
   and their golden calls; every other package tests against it first.
 
-**Interview Q&A**
+**Questions and answers**
 1. *Why diff states instead of comparing hashes?* A hash says "different"; a diff says *what* changed, which is what
    verifiers and mutation operators reason about (collateral edits, duplicates, wrong record).
 2. *Why ignore volatile fields?* Timestamps change on every run; including them would make every replay "different"

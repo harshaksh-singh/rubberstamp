@@ -60,43 +60,54 @@ class GateMonitor:
 def base_gate(
     rows: Sequence[Mapping[str, Any]], *, strict: str, templates: Collection[str], g: int, settings: GateSettings
 ) -> dict[str, Any]:
-    """Go/no-go from the base sweep rescored by the strict verifier (rescore rows). Gated on the training
-    `templates` (held-out tasks are reported, not gated); `ok` is False when a gated task is outside the pass
-    range or has fewer than G samples, a training template was never sampled, or the zero-variance share is
-    above its cap."""
-    counts: dict[str, list[Any]] = {}  # task id -> [template, n, passed]
+    """Go/no-go from the base sweep rescored by the strict verifier (rescore rows), decided per template.
+
+    A template's procedural instances share one task, so they are pooled: base_samples are spread over up to
+    20 instances (8-16 samples each), too few to estimate pass@G per instance (with n = G it is 0 or 1). Gated on
+    the training `templates` (held-out ones are reported, not gated); `ok` is False when a gated template is outside
+    the pass range or has fewer than G samples, a training template was never sampled, or the zero-variance share
+    is above its cap. Per-instance counts are kept as a diagnostic."""
+    by_template: dict[str, list[int]] = {}  # template -> [n, passed]
+    by_instance: dict[str, list[Any]] = {}  # task id -> [template, n, passed]
     for r in rows:
         if r["phase"] == "base" and r["kind"] == "verifier" and r["scorer"] == strict:
-            tally = counts.setdefault(r["task_id"], [r["template"], 0, 0])
-            tally[1] += 1
-            tally[2] += int(bool(r["passed"]))
+            hit = int(bool(r["passed"]))
+            t = by_template.setdefault(r["template"], [0, 0])
+            t[0] += 1
+            t[1] += hit
+            i = by_instance.setdefault(r["task_id"], [r["template"], 0, 0])
+            i[1] += 1
+            i[2] += hit
     low, high = settings.base_pass_range
-    tasks: dict[str, dict[str, Any]] = {}
-    for task_id, (template, n, c) in sorted(counts.items()):
+    pooled: dict[str, dict[str, Any]] = {}
+    for template, (n, c) in sorted(by_template.items()):
         p = c / n
         pass_g = pass_at_k(n, c, g) if n >= g else None
-        tasks[task_id] = {
-            "template": template,
+        pooled[template] = {
             "n": n,
             "passed": c,
             f"pass@{g}": pass_g,
             "zero_variance": p**g + (1 - p) ** g,
             "gated": template in templates,
             "in_range": pass_g is not None and low <= pass_g <= high,
+            "instances": sum(1 for v in by_instance.values() if v[0] == template),
         }
-    gated = [t for t in tasks.values() if t["gated"]]
-    outside = [task_id for task_id, t in tasks.items() if t["gated"] and not t["in_range"]]
-    unsampled = sorted(set(templates) - {t["template"] for t in gated})
+    gated = [t for t in pooled.values() if t["gated"]]
+    outside = [template for template, t in pooled.items() if t["gated"] and not t["in_range"]]
+    unsampled = sorted(set(templates) - {template for template, t in pooled.items() if t["gated"]})
     share = sum(t["zero_variance"] for t in gated) / len(gated) if gated else math.nan
     ok = bool(gated) and not outside and not unsampled and share <= settings.base_zero_variance_max
+    tasks = {task_id: {"template": tpl, "n": n, "passed": c} for task_id, (tpl, n, c) in sorted(by_instance.items())}
     return {
         "ok": ok,
         "strict": strict,
         "group_size": g,
         f"pass@{g}_range": [low, high],
+        "unit": "template",
         "outside_range": outside,
         "unsampled_templates": unsampled,
         "zero_variance_share": share,
         "zero_variance_max": settings.base_zero_variance_max,
+        "templates": pooled,
         "tasks": tasks,
     }

@@ -25,7 +25,7 @@ feed the process checks and `final_answer` feeds the answer checks. All of them 
 into a `Verdict`. A lenient verifier is the same pipeline on a transformed spec, or wrapped
 for `TRUST_CLAIM`.
 
-## Interview Q&A
+## Questions and answers
 
 1. **Why match inserted rows by content, not by primary key?**
    Generated ids depend on incidental history (how many rows existed, retries, the

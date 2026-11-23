@@ -57,7 +57,7 @@ class GateSettings(Frozen):
     step_time_window: int = 3
     logp_diff_max: float | None = 0.5  # sampling/sampling_logp_difference/mean: vLLM vs trainer, per token
     logp_diff_window: int = 3
-    base_pass_range: tuple[float, float] = (0.1, 0.7)  # research/64 §3: per-task strict pass@G in 10-70%
+    base_pass_range: tuple[float, float] = (0.1, 0.7)  # research/64 §3: per-template strict pass@G in 10-70%
     base_zero_variance_max: float = 0.6  # predicted share of all-equal groups, mean(p^G + (1 - p)^G)
 
 

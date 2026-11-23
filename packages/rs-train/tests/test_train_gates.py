@@ -95,19 +95,20 @@ def base_rows(rates: dict[str, tuple[str, int, int]]):
     return rows
 
 
-def test_the_base_gate_checks_per_task_pass_at_g_and_the_zero_variance_share():
+def test_the_base_gate_checks_per_template_pass_at_g_and_the_zero_variance_share():
     settings = GateSettings()
     ok = base_rows({"a": ("A", 64, 8), "b": ("B", 64, 4), "held": ("H", 64, 64)})
     report = base_gate(ok, strict="strict", templates=["A", "B"], g=8, settings=settings)
-    assert report["ok"] and report["tasks"]["held"]["gated"] is False  # held-out tasks are not gated
-    assert report["tasks"]["a"]["pass@8"] == pytest.approx(1 - math.comb(56, 8) / math.comb(64, 8))
+    assert report["ok"] and report["unit"] == "template"
+    assert report["templates"]["H"]["gated"] is False  # held-out templates are reported, not gated
+    assert report["templates"]["A"]["pass@8"] == pytest.approx(1 - math.comb(56, 8) / math.comb(64, 8))
     p = 8 / 64, 4 / 64
     expected = sum(x**8 + (1 - x) ** 8 for x in p) / 2
     assert report["zero_variance_share"] == pytest.approx(expected) and expected <= 0.6
 
-    easy = base_rows({"a": ("A", 64, 60), "b": ("B", 64, 4)})  # pass@8 of `a` is 1.0: out of range
+    easy = base_rows({"a": ("A", 64, 60), "b": ("B", 64, 4)})  # pass@8 of `A` is 1.0: out of range
     report = base_gate(easy, strict="strict", templates=["A", "B"], g=8, settings=settings)
-    assert not report["ok"] and report["outside_range"] == ["a"]
+    assert not report["ok"] and report["outside_range"] == ["A"]
 
     hard = base_rows({"a": ("A", 64, 1), "b": ("B", 64, 1)})  # in range, but most groups all fail
     report = base_gate(hard, strict="strict", templates=["A", "B"], g=8, settings=settings.model_copy(
@@ -116,6 +117,22 @@ def test_the_base_gate_checks_per_task_pass_at_g_and_the_zero_variance_share():
 
     partial = base_gate(ok, strict="strict", templates=["A", "B", "C"], g=8, settings=settings)
     assert not partial["ok"] and partial["unsampled_templates"] == ["C"]
+
+
+@pytest.mark.parametrize("per_instance", [8, 16])
+def test_the_base_gate_pools_a_templates_procedural_instances(per_instance):
+    """Final review: base samples are spread over up to 20 instances per template (8 on smoke, 16 on main). Gated
+    per instance, pass@8 is 0 or 1 at n = 8, so every base model was a no-go. Pooled per template, a template whose
+    instances pass about 10% of the time is a go (pass@8 in range, zero-variance share under its cap)."""
+    rates = {}
+    for template in ("A", "B"):
+        for k in range(20):
+            passed = 1 if per_instance == 8 else 1 + k % 2  # 12.5% of 160, or 9.4% of 320
+            rates[f"{template.lower()}@{k}"] = (template, per_instance, passed)
+    report = base_gate(base_rows(rates), strict="strict", templates=["A", "B"], g=8, settings=GateSettings())
+    assert report["ok"], report["outside_range"]
+    assert report["templates"]["A"]["n"] == 20 * per_instance and report["templates"]["A"]["instances"] == 20
+    assert len(report["tasks"]) == 40  # instances stay visible as a diagnostic
 
 
 def test_the_gate_command_exits_non_zero_on_a_no_go(tmp_path, capsys):
