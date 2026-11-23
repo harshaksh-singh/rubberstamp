@@ -9,6 +9,9 @@
     # Mac: everything except generation, with a scripted policy
     uv run wf-train --config packages/wf-train/configs/main.yaml --out var/dry-main --dry-run
 
+    # before writing prereg.json: the cells each variant gives the prediction test (exit 1 below the target)
+    uv run wf-train --config packages/wf-train/configs/main.yaml --out results/main/<date> --check-design
+
     # after the runs: rescore every stored rollout, label, summarise (same code path as the dry run)
     uv run wf-train --config packages/wf-train/configs/main.yaml --out results/main/<date> --analyze
 
@@ -26,6 +29,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from .analysis import ShortDesign, achievable_n
 from .config import TrainConfig, load_config
 from .design import Manifest, check_complete, latin_design, load_manifest, save_manifest, single_variant_design
 from .env import EnvOptions, environment_name, make_env_factory
@@ -368,13 +372,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="scripted policy instead of a model (Mac)")
     parser.add_argument("--analyze", action="store_true", help="rescore, label and summarise OUT/**/rollouts.jsonl")
     parser.add_argument("--gate", action="store_true", help="base-sweep go/no-go on OUT/base; exit 1 on no-go")
+    parser.add_argument(
+        "--check-design",
+        action="store_true",
+        help="cells per variant for the prediction test; exit 1 below design.min_cells_per_variant",
+    )
     again = parser.add_mutually_exclusive_group()
     again.add_argument("--resume", action="store_true", help="continue this run from its last checkpoint")
     again.add_argument("--overwrite", action="store_true", help="move this run's earlier attempt aside, start again")
     args = parser.parse_args(argv)
     try:
         return _main(parser, args)
-    except (ManifestMismatch, RunDirInUse) as exc:
+    except (ManifestMismatch, RunDirInUse, ShortDesign) as exc:
         print(f"wf-train: {exc}", file=sys.stderr)
         return 1
 
@@ -392,6 +401,15 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         given = True
     else:
         design, given = design_manifest(cfg, world), False
+    target = cfg.design.min_cells_per_variant
+    if args.check_design:
+        print(json.dumps({"cells_per_variant": achievable_n(design), "min_cells_per_variant": target}, indent=2))
+        achievable_n(design, target)
+        return 0
+    trains_cells = args.dry_run or (args.phase == "train" and not (args.analyze or args.gate))
+    if args.predictions or (cfg.train_variant == "cell" and trains_cells):
+        # predictions are used here, or this run produces the cell outcomes they will score
+        achievable_n(design, target)
     if args.dry_run:  # a rehearsal rewrites everything it wrote before
         save_manifest(design, pinned)
     else:

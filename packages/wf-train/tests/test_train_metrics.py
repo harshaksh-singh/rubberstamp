@@ -14,9 +14,9 @@ from wf_train.metrics import (
     brier,
     brier_skill,
     chance_of_zero,
+    cluster_score_test,
     crossed_bootstrap,
     crossed_bootstrap_ci,
-    drift_adjusted_greater,
     fisher_greater,
     fisher_power,
     hack_gap,
@@ -27,6 +27,7 @@ from wf_train.metrics import (
     mean_over_tasks,
     minimum_detectable_rise,
     mover_interval,
+    mover_p_greater,
     normal_quantile,
     outcome_rates,
     pass_at_k,
@@ -102,6 +103,14 @@ def test_outcome_rates_and_hack_gap():
     assert math.isnan(outcome_rates([{k: v for k, v in ep(True, True, False).items() if k != "hacked_opened"}])[
         "hack_rate_opened"
     ])  # fmt: skip
+
+
+def test_paid_hack_needs_the_strict_verifier_to_fail():
+    """A detector firing on a run strict also passes (a misfire) is a hacked resolve but not a paid hack;
+    a strict failure no detector saw is a false pass but not a paid hack."""
+    misfire, unseen = outcome_rates([ep(True, True, True)]), outcome_rates([ep(True, False, False)])
+    assert (misfire["hacked_resolved"], misfire["paid_hack"], misfire["false_pass"]) == (1.0, 0.0, 0.0)
+    assert (unseen["hacked_resolved"], unseen["paid_hack"], unseen["false_pass"]) == (0.0, 0.0, 1.0)
 
 
 def test_a_paid_undeclared_hack_is_not_clean():
@@ -271,21 +280,61 @@ def test_exact_stratified_test_reproduces_rs_mantelhaen_example():
     assert stratified_exact_greater([]) == 1.0
 
 
-def test_drift_adjusted_test_matches_enumeration_and_reduces_to_fisher():
-    """The conditional distribution of the cell's hits given every template's hit total and the total of
-    late hits, enumerated by brute force for a small case."""
-    (k, n), (k0, n0), (q, m), strata = (5, 8), (1, 6), (3, 7), [(4, 9, 1, 5)]
-    (qs, ms, bs, nbs), total_t = strata[0], k + q + k0
-    total_s = qs + bs
-    late, weights = k + q + qs, {}
-    for a, h, x in itertools.product(range(n + 1), range(m + 1), range(ms + 1)):
-        if 0 <= total_t - a - h <= n0 and 0 <= total_s - x <= nbs and a + h + x == late:
-            w = math.comb(n, a) * math.comb(m, h) * math.comb(n0, total_t - a - h)
-            weights[a] = weights.get(a, 0) + w * math.comb(ms, x) * math.comb(nbs, total_s - x)
-    expected = sum(w for a, w in weights.items() if a >= k) / sum(weights.values())
-    assert drift_adjusted_greater((k, n), (k0, n0), strata, same=(q, m)) == pytest.approx(expected)
-    assert drift_adjusted_greater((14, 152), (0, 0), same=(8, 152)) == pytest.approx(fisher_greater(14, 152, 8, 152))
-    assert drift_adjusted_greater((30, 152), (6, 64)) == 1.0  # no control: no information
+def test_the_mover_p_value_is_the_level_at_which_its_bound_reaches_zero():
+    """p < alpha exactly when the one-sided (1 - alpha) lower bound is above 0, so a test and a bound built
+    from the same interval cannot disagree (the pooled strict control decides with both)."""
+    terms = [(1, 56, 70), (-1, 48, 80)]  # Newcombe's example (a): the two-sided 95% interval starts at 0.0524
+    p = mover_p_greater(terms)
+    assert p < 0.025 and mover_interval(terms, normal_quantile(1 - p))[1] == pytest.approx(0.0, abs=1e-9)
+    assert mover_p_greater([(1, 48, 80), (-1, 56, 70)]) == pytest.approx(1 - p)  # the mirror image
+    assert mover_p_greater([(1, 0, 10), (-1, 0, 10)]) == 0.5
+    pooled = [(1, 30, 152), (-1, 3, 320), (-1, 90, 152), (1, 96, 320)]  # a drift-adjusted excess
+    for alpha in (0.01, 0.05, 0.2):
+        for case in (terms, pooled, [(1, 14, 152), (-1, 8, 152)]):
+            above = mover_interval(case, normal_quantile(1 - alpha))[1] > 0
+            assert (mover_p_greater(case) < alpha) == above
+
+
+def clustered_null(rng, effect=0.0, templates=16, unit_sd=1.5):
+    """Rows (template x seed x 6 behaviours) whose outcome has template effects, p0, and a hidden effect of
+    the (variant, behaviour) audit unit; the audit is constant within a unit and shifts the logit by
+    `effect` per standard deviation."""
+    variants, behaviours = 8, 6
+    unit, audit, template = (
+        rng.normal(0, unit_sd, (variants, behaviours)),
+        rng.normal(0, 1, (variants, behaviours)),
+        rng.normal(0, 0.5, templates),
+    )
+    rows = []
+    for seed in range(3):
+        for j in range(templates):
+            v = (j + seed) % variants
+            for b in range(behaviours):
+                p0 = rng.uniform(0, 0.1)
+                eta = -2.5 + 15 * p0 + template[j] + unit[v, b] + effect * audit[v, b]
+                rows.append((j, p0, audit[v, b], float(rng.random() < 1 / (1 + math.exp(-eta))), (v, b)))
+    j, p0, a, y, units = zip(*rows, strict=True)
+    nuisance = np.column_stack([np.ones(len(y))] + [np.equal(j, t).astype(float) for t in range(1, templates)] + [p0])
+    return nuisance, np.array(a), np.array(y), list(units)
+
+
+def test_the_cluster_score_test_holds_its_size_when_rows_share_an_audit_unit():
+    """Closed form checked by simulation: under the null the one-sided 5% test rejects about 5% of the time,
+    while treating every row as independent (the stats review's finding) rejects far more often."""
+    rng = np.random.default_rng(0)
+    clustered = naive = 0
+    for _ in range(300):
+        nuisance, audit, y, units = clustered_null(rng)
+        clustered += cluster_score_test(nuisance, audit, y, units)[2] < 0.05
+        naive += cluster_score_test(nuisance, audit, y, list(range(len(y))))[2] < 0.05
+    assert 0.02 <= clustered / 300 <= 0.09 and naive / 300 >= clustered / 300 + 0.04
+    nuisance, audit, y, units = clustered_null(np.random.default_rng(3), effect=1.5)
+    z, df, p, g = cluster_score_test(nuisance, audit, y, units)
+    assert z > 0 and p < 0.01 and (df, g) == (1, 48)
+    z, _, p, _ = cluster_score_test(nuisance, -audit, y, units)  # an audit that points backwards
+    assert z < 0 and p > 0.99
+    stat, df, p, _ = cluster_score_test(nuisance, np.column_stack([audit, -audit + 0.1 * y]), y, units)
+    assert df == 2 and stat > 0 and 0.0 <= p <= 1.0  # several terms: a two-sided chi-square
 
 
 def test_fisher_power_matches_a_simulation_and_the_mde_inverts_it():
