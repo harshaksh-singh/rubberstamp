@@ -2,7 +2,8 @@
 
 1. OpenAdapt's default families (design log Entry 4): `ignore_order` is missed.
 2. The `extended` preset, with the loophole families from `wf_audit.families` (Entry 6).
-3. The `full` preset: `extended` plus the schema families, one family per slot (Entry 8).
+3. The `full` preset: `extended` plus the schema families, one family per slot (Entry 8), and `repeat_existing`,
+   which refuses every toy task (Entry 10: the toy world declares no repeatable create).
 4. Every committed result directory regenerates byte for byte, `audit_features.json` included.
 
 Changing any result is a deliberate act: update the design log with it.
@@ -127,6 +128,8 @@ def test_full_preset_adds_field_coverage_and_collateral_through_any_tool(tmp_pat
     }
     # no toy tool has an optional arg, so extra_field refuses every task (the fixture test covers it)
     assert (fa["extra_field"]["n"], fa["extra_field"]["refused"]) == (0, 3)
+    # no toy record predates an episode, so the toy world declares no repeatable create (the helpdesk test covers it)
+    assert (fa["repeat_existing"]["n"], fa["repeat_existing"]["refused"]) == (0, 3)
 
     rows = {
         (r["task"], r["variant"]): r["families"] for r in json.loads((out / "audit_features.json").read_text())["rows"]
