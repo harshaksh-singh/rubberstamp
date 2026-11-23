@@ -1,12 +1,13 @@
 """Truth table for the state layer (SPEC §3): expectations, exact counts, inserts matched by
-content, extra fields on matched updates, allow rules, and strict-scope collateral."""
+content, extra fields on matched updates, allow rules, and strict-scope collateral; plus the
+additions: "at most" tolerances, final-state counts and backed claims."""
 
 import copy
 
 import pytest
 from wf_core.diff import diff
 from wf_core.models import SchemaInfo, Snapshot, TableInfo
-from wf_verify import AllowRule, ExpectedChange, FieldPred, StateSpec, eq
+from wf_verify import AllowRule, BackedClaim, ExpectedChange, FieldPred, FinalCount, RowMatch, StateSpec, eq
 from wf_verify.state import check_state
 
 SCHEMA = SchemaInfo(
@@ -215,3 +216,104 @@ def test_check_details_explain_the_failure():
     )
     (check,) = check_state(S(CLOSE_1), d)
     assert "1 of 1 located rows" in check.detail and "items/1/qty" in check.detail
+
+
+# ---------------------------------------------------------------- at_most, final counts, backed claims
+
+
+def failed_with_final(state: StateSpec, after) -> list[str]:
+    final = Snapshot(schema_version="t", tables=after)
+    d = diff(Snapshot(schema_version="t", tables=BEFORE), final, SCHEMA)
+    return [c.id for c in check_state(state, d, final) if not c.passed]
+
+
+NOTE = {"id": "n1", "owner": "a", "text": "hi"}
+NOTE_2 = {"id": "n2", "owner": "a", "text": "again"}
+UP_TO_ONE_NOTE_A = ExpectedChange(
+    table="notes", kind="insert", where=(eq("/owner", "a"),), count=1, count_mode="at_most"
+)
+OPEN_ITEMS = FinalCount(table="items", where=(eq("/status", "open"),), count=2)
+NEW_ITEM = {"id": "3", "owner": "a", "status": "open", "qty": 1, "meta": {"x": 0}, "updated_at": "tue"}
+CLAIM_CLOSED = BackedClaim(
+    claim=RowMatch(table="notes", where=(FieldPred(path="/text", op="regex", value="(?i)closed"),)),
+    evidence=RowMatch(table="items", kind="update", where=(eq("/id", "1"),)),
+)
+
+EXTENDED_CASES = [
+    ("at_most: none is fine", S(UP_TO_ONE_NOTE_A), edit(), []),
+    ("at_most: one is covered, not collateral", S(UP_TO_ONE_NOTE_A), edit(("put", "notes", "n1", NOTE)), []),
+    (
+        "at_most: one too many",
+        S(UP_TO_ONE_NOTE_A),
+        edit(("put", "notes", "n1", NOTE), ("put", "notes", "n2", NOTE_2)),
+        ["state:expect:0"],
+    ),
+    ("final: the seeded rows satisfy an exact count", StateSpec(expected=(), final=(OPEN_ITEMS,)), edit(), []),
+    (
+        "final: a new matching row breaks the exact count but is not collateral",
+        StateSpec(expected=(), final=(OPEN_ITEMS,)),
+        edit(("put", "items", "3", NEW_ITEM)),
+        ["state:final:0"],
+    ),
+    (
+        "final at_least: a new matching row passes",
+        StateSpec(expected=(), final=(OPEN_ITEMS.model_copy(update={"count_mode": "at_least"}),)),
+        edit(("put", "items", "3", NEW_ITEM)),
+        [],
+    ),
+    (
+        "final: an update that leaves the count is still collateral (only inserts are covered)",
+        StateSpec(expected=(), final=(OPEN_ITEMS,)),
+        edit(("set", "items", "1", "qty", 5)),
+        ["state:scope:items:1"],
+    ),
+    (
+        "final: closing a seeded row lowers the count",
+        StateSpec(expected=(CLOSE_1,), final=(OPEN_ITEMS,)),
+        edit(("set", "items", "1", "status", "closed")),
+        ["state:final:0"],
+    ),
+    (
+        "backed: no claim needs no evidence",
+        StateSpec(expected=(), backed=(CLAIM_CLOSED,), strict_scope=False),
+        edit(),
+        [],
+    ),
+    (
+        "backed: a claim without the change fails",
+        StateSpec(expected=(), backed=(CLAIM_CLOSED,), strict_scope=False),
+        edit(("put", "notes", "n1", {"id": "n1", "owner": "a", "text": "Item closed."})),
+        ["state:backed:0"],
+    ),
+    (
+        "backed: a claim with the change passes",
+        StateSpec(expected=(), backed=(CLAIM_CLOSED,), strict_scope=False),
+        edit(
+            ("put", "notes", "n1", {"id": "n1", "owner": "a", "text": "Item closed."}),
+            ("set", "items", "1", "status", "closed"),
+        ),
+        [],
+    ),
+    (
+        "backed: evidence on another record does not count",
+        StateSpec(expected=(), backed=(CLAIM_CLOSED,), strict_scope=False),
+        edit(
+            ("put", "notes", "n1", {"id": "n1", "owner": "a", "text": "Item closed."}),
+            ("set", "items", "2", "status", "closed"),
+        ),
+        ["state:backed:0"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "state", "after", "expected_failures"), EXTENDED_CASES, ids=[c[0] for c in EXTENDED_CASES]
+)
+def test_at_most_final_and_backed_truth_table(name, state, after, expected_failures):
+    assert sorted(failed_with_final(state, after)) == sorted(expected_failures)
+
+
+def test_final_count_without_a_snapshot_fails_loudly():
+    d = diff(Snapshot(schema_version="t", tables=BEFORE), Snapshot(schema_version="t", tables=edit()), SCHEMA)
+    (check,) = [c for c in check_state(StateSpec(expected=(), final=(OPEN_ITEMS,)), d) if c.id == "state:final:0"]
+    assert not check.passed and "no final snapshot" in check.detail

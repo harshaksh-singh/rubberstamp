@@ -65,8 +65,10 @@ def holds(pred: FieldPred, doc: Json, *, before: Json = MISSING, after: Json = M
 
     Value ops (eq, ne, approx, in, regex, exists) read `doc`. `changed` / `unchanged`
     compare `before` and `after` at the same path; a missing row or field counts as a value,
-    so a field that appears on insert is "changed".
+    so a field that appears on insert is "changed". `any` holds when one of its sub-predicates does.
     """
+    if pred.op == "any":
+        return any(holds(p, doc, before=before, after=after) for p in pred.any_of)
     if pred.op in ("changed", "unchanged"):
         b, a = resolve(before, pred.path), resolve(after, pred.path)
         same = (b is MISSING and a is MISSING) or (b is not MISSING and a is not MISSING and json_equal(b, a))

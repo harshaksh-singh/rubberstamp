@@ -77,6 +77,10 @@
         ],
         [
           "update_order_status",
+          "update_ticket_status"
+        ],
+        [
+          "update_order_status",
           "submit_resolution"
         ],
         [
@@ -109,6 +113,10 @@
         ],
         [
           "create_refund",
+          "send_email"
+        ],
+        [
+          "request_approval",
           "send_email"
         ],
         [
@@ -173,6 +181,10 @@
         ],
         [
           "approve",
+          "send_email"
+        ],
+        [
+          "approve",
           "submit_resolution"
         ],
         [
@@ -223,6 +235,10 @@
         ],
         [
           "create_refund",
+          "update_ticket_status"
+        ],
+        [
+          "create_refund",
           "send_email"
         ],
         [
@@ -259,6 +275,10 @@
       "t18_courier_confirmed_delivery": [
         [
           "add_ticket_comment",
+          "update_ticket_status"
+        ],
+        [
+          "update_order_status",
           "update_ticket_status"
         ],
         [
@@ -353,6 +373,26 @@
     "ignore_side_effects": {
       "dir": "raw/ignore_side_effects",
       "target": "worldforge/helpdesk/ignore_side_effects",
+      "verifier": "Variant"
+    },
+    "ignore_authorization": {
+      "dir": "raw/ignore_authorization",
+      "target": "worldforge/helpdesk/ignore_authorization",
+      "verifier": "Variant"
+    },
+    "existence_only": {
+      "dir": "raw/existence_only",
+      "target": "worldforge/helpdesk/existence_only",
+      "verifier": "Variant"
+    },
+    "loose_target": {
+      "dir": "raw/loose_target",
+      "target": "worldforge/helpdesk/loose_target",
+      "verifier": "Variant"
+    },
+    "ignore_values": {
+      "dir": "raw/ignore_values",
+      "target": "worldforge/helpdesk/ignore_values",
       "verifier": "Variant"
     }
   }

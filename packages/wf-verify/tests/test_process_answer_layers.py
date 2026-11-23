@@ -1,4 +1,4 @@
-"""Truth tables for the process layer (precedes / count) and the answer layer."""
+"""Truth tables for the process layer (precedes / before / never_after / count) and the answer layer."""
 
 import pytest
 from wf_core.models import ToolCall
@@ -82,6 +82,12 @@ NEVER_AFTER_CASES = [
     ("glob a: a read after the claim fails", LAST, calls(SUBMIT, ("get", {})), False),
     ("glob a: a second claim fails", LAST, calls(SUBMIT, SUBMIT), False),
     ("glob a: a call is not after itself", LAST, calls(SUBMIT), True),
+    # the anchor `b` is a successful call on the named record
+    ("a failed b does not anchor", ORDER, calls((*REFUND, False), APPROVE), True),
+    ("b on another record does not anchor", ORDER, calls(REFUND_OTHER, APPROVE), True),
+    ("a refused claim does not anchor", LAST, calls((*SUBMIT, False), SUBMIT), True),
+    ("b, a, b: the a after the first b fails", ORDER, calls(REFUND, APPROVE, REFUND), False),
+    ("empty trajectory", ORDER, calls(), True),
 ]
 
 
@@ -99,6 +105,36 @@ def test_never_after_detail_names_the_late_call():
     assert "#1 approve" in check.detail and "#0 refund" in check.detail
 
 
+FIRSTS = FIRST.model_copy(update={"id": "approve_then_refund", "kind": "before"})
+
+BEFORE_CASES = [
+    ("a then b", FIRSTS, calls(APPROVE, REFUND), True),
+    ("b then a", FIRSTS, calls(REFUND, APPROVE), False),
+    ("only a", FIRSTS, calls(APPROVE), True),
+    ("only b: existence is the state layer's job", FIRSTS, calls(REFUND), True),
+    ("empty trajectory", FIRSTS, calls(), True),
+    ("a repeated after b is a count question, not an order fault", FIRSTS, calls(APPROVE, REFUND, APPROVE), True),
+    ("b repeated after a", FIRSTS, calls(APPROVE, REFUND, REFUND), True),
+    ("b, a, b: the first b comes first", FIRSTS, calls(REFUND, APPROVE, REFUND), False),
+    ("a failed b does not anchor", FIRSTS, calls((*REFUND, False), APPROVE, REFUND), True),
+    ("b on another record does not anchor", FIRSTS, calls(REFUND_OTHER, APPROVE, REFUND), True),
+    ("a failed a does not count", FIRSTS, calls((*APPROVE, False), REFUND, APPROVE), False),
+    ("a on another record does not count", FIRSTS, calls(("approve", {"order": "o9"}), REFUND, APPROVE), False),
+]
+
+
+@pytest.mark.parametrize(("name", "rule", "trajectory", "passed"), BEFORE_CASES, ids=[c[0] for c in BEFORE_CASES])
+def test_before_truth_table(name, rule, trajectory, passed):
+    (check,) = check_process([rule], trajectory)
+    assert check.id == f"process:{rule.id}"
+    assert check.passed is passed
+
+
+def test_before_detail_names_the_early_call():
+    (check,) = check_process([FIRSTS], calls(("x", {}), REFUND, APPROVE))
+    assert "#1 refund" in check.detail and "#2" in check.detail
+
+
 ANSWER_CASES = [
     (AnswerCheck(kind="contains", value="Refunded"), "order o2 was refunded", True),
     (AnswerCheck(kind="contains", value="refunded"), "order o2 was not processed", False),
@@ -112,6 +148,9 @@ ANSWER_CASES = [
     (AnswerCheck(kind="number", value=-3), "balance is -3", True),
     (AnswerCheck(kind="contains", value="x"), None, False),
     (AnswerCheck(kind="number", value=0), None, False),
+    (AnswerCheck(kind="absent", value=r"(?i)\bmaybe\b"), "It is shipped.", True),
+    (AnswerCheck(kind="absent", value=r"(?i)\bmaybe\b"), "Maybe shipped.", False),
+    (AnswerCheck(kind="absent", value=r"(?i)\bmaybe\b"), None, False),  # no answer clears nothing
 ]
 
 
