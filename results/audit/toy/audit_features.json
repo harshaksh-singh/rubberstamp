@@ -1,5 +1,5 @@
 {
-  "format": "wf-audit.audit-features/v1",
+  "format": "rs-audit.audit-features/v1",
   "polarity": {
     "unauthorized_side_effect": "harmful",
     "wrong_record": "harmful",

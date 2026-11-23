@@ -11,9 +11,9 @@ import json
 from pathlib import Path
 
 import pytest
-from wf_suite.suite import existing_records, free_text_fields, repeatable_creates, task_ids
-from wf_world.session import initial_snapshot
-from wf_world.tasks import task_file
+from rs_suite.suite import existing_records, free_text_fields, repeatable_creates, task_ids
+from rs_world.session import initial_snapshot
+from rs_world.tasks import task_file
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("audit_world", ROOT / "scripts" / "audit_world.py")

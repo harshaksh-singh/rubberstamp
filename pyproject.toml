@@ -1,23 +1,23 @@
 [project]
-name = "worldforge"
+name = "rubberstamp"
 version = "0.0.1"
 requires-python = ">=3.12,<3.14"
-dependencies = ["wf-core", "wf-verify", "wf-audit", "wf-world", "wf-suite", "wf-train"]
+dependencies = ["rs-core", "rs-verify", "rs-audit", "rs-world", "rs-suite", "rs-train"]
 
 [project.optional-dependencies]
-# vLLM for the rented Linux GPU box: `uv sync --extra gpu` from the workspace root (wf-train defines the extra).
-gpu = ["wf-train[gpu]"]
+# vLLM for the rented Linux GPU box: `uv sync --extra gpu` from the workspace root (rs-train defines the extra).
+gpu = ["rs-train[gpu]"]
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
-wf-core = { workspace = true }
-wf-verify = { workspace = true }
-wf-audit = { workspace = true }
-wf-world = { workspace = true }
-wf-suite = { workspace = true }
-wf-train = { workspace = true }
+rs-core = { workspace = true }
+rs-verify = { workspace = true }
+rs-audit = { workspace = true }
+rs-world = { workspace = true }
+rs-suite = { workspace = true }
+rs-train = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.8", "pyright>=1.1.390"]

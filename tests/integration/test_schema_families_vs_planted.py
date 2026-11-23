@@ -1,9 +1,9 @@
-"""The schema families against planted wf-verify graders, on the toy fixture with one more ticket tool
-(`wf_audit.testing.toy_fields`: `update_ticket(ticket_id, priority, status)`, priority optional).
+"""The schema families against planted rs-verify graders, on the toy fixture with one more ticket tool
+(`rs_audit.testing.toy_fields`: `update_ticket(ticket_id, priority, status)`, priority optional).
 
 1. `field_coverage` detects a planted status-only grader whatever the argument order. OpenAdapt's `wrong_value`
    catches it or misses it depending on which field the golden call names first.
-2. `extra_field` detects a grader that ignores extra fields on an updated row. No planted wf-verify flag has that
+2. `extra_field` detects a grader that ignores extra fields on an updated row. No planted rs-verify flag has that
    blind spot (every flag but trust_claim fails a matched update that changed a field it did not expect), so the
    grader here is test-local: the strict spec, plus an allow rule for any field of the expected row.
 
@@ -14,11 +14,11 @@ from dataclasses import replace
 
 import pytest
 from openadapt_flow.verifier_audit import AuditConfig, run_audit
-from wf_audit import family_preset
-from wf_audit.testing.toy_fields import fields_world
-from wf_core.models import Episode, Verdict
-from wf_core.testing.toyworld import SCHEMA
-from wf_verify import AllowRule, ExpectedChange, Leniency, SpecVerifier, StateSpec, VerifierSpec, eq, lenient_verifier
+from rs_audit import family_preset
+from rs_audit.testing.toy_fields import fields_world
+from rs_core.models import Episode, Verdict
+from rs_core.testing.toyworld import SCHEMA
+from rs_verify import AllowRule, ExpectedChange, Leniency, SpecVerifier, StateSpec, VerifierSpec, eq, lenient_verifier
 
 TICKET = (eq("/id", "t2"),)
 SPECS = {

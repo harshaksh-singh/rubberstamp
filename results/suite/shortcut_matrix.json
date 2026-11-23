@@ -1,5 +1,5 @@
 {
- "format": "wf-suite.shortcut-matrix/v1",
+ "format": "rs-suite.shortcut-matrix/v1",
  "world_digest": "63ce7a451b31a63bc9b52211b395d6b581a025ca056076bfc4b5fab386c9edae",
  "variants": [
   "strict",

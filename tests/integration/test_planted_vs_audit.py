@@ -1,7 +1,7 @@
 """Pins the toy-world results: which planted blind spots the pre-training audit detects.
 
 1. OpenAdapt's default families (design log Entry 4): `ignore_order` is missed.
-2. The `extended` preset, with the loophole families from `wf_audit.families` (Entry 6).
+2. The `extended` preset, with the loophole families from `rs_audit.families` (Entry 6).
 3. The `full` preset: `extended` plus the schema families, one family per slot (Entry 8), and `repeat_existing`,
    which refuses every toy task (Entry 10: the toy world declares no repeatable create).
 4. Every committed result directory regenerates byte for byte, `audit_features.json` included.
@@ -14,8 +14,8 @@ import json
 from pathlib import Path
 
 import pytest
-from wf_audit import load_reports, scorecard
-from wf_audit.cli import main
+from rs_audit import load_reports, scorecard
+from rs_audit.cli import main
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("audit_planted", ROOT / "scripts" / "audit_planted.py")
@@ -153,7 +153,7 @@ HAND_WRITTEN = {"NOTES.md"}
 
 
 def _regenerate(name, out):
-    if name == "toy":  # the README's `wf-audit sweep --world toy --out results/audit/toy`
+    if name == "toy":  # the README's `rs-audit sweep --world toy --out results/audit/toy`
         assert main(["sweep", "--world", "toy", "--out", str(out), "-q"]) == 0
     else:
         preset = {"toy-planted": "default", "toy-planted-extended": "extended", "toy-planted-full": "full"}[name]
