@@ -1,4 +1,6 @@
 # Weekly dependency updates, grouped so each ecosystem opens at most one PR.
+# Held majors: TypeScript 7 (the native compiler) until @astrojs/check, Next.js type checking and typescript-eslint
+# support it; @types/node majors beyond the Node 24 runtime CI and Pages build on.
 version: 2
 updates:
   - package-ecosystem: uv
@@ -11,6 +13,23 @@ updates:
     schedule: {interval: weekly}
     groups:
       site: {patterns: ["*"]}
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: npm
+    directory: /apps/helpdesk
+    schedule: {interval: weekly}
+    groups:
+      helpdesk: {patterns: ["*"]}
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly}
