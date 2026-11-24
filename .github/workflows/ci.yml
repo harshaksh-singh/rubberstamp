@@ -1,4 +1,5 @@
-# Lint, type-check and test the Python workspace; check that the site's data is current and that the site builds.
+# Lint, type-check and test the Python workspace; check that the site's data is current and that the site builds;
+# check the helpdesk app: rs-api's parity tests and an HTTP smoke test, and the UI's lint, type check and build.
 name: CI
 
 on:
@@ -55,4 +56,47 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - run: npm ci
       - run: npm run check
+      - run: npm run build
+
+  helpdesk-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Type-check rs-api
+        run: uv run pyright packages/rs-api/src
+      - name: Parity tests (API vs replay, every task, three world seeds)
+        run: uv run pytest -q packages/rs-api
+      - name: Smoke test over HTTP (every golden passes strict, every shortcut is caught and paid by its blind spot)
+        run: |
+          uv run rs-api --port 8787 > rs-api.log 2>&1 &
+          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:8787/health > /dev/null && break; sleep 1; done
+          uv run python scripts/drive_api.py --all --plan golden --expect strict:pass
+          uv run python scripts/drive_api.py --all --plan shortcut --expect strict:fail --expect own:pass
+
+  helpdesk-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    defaults:
+      run:
+        working-directory: apps/helpdesk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/helpdesk/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
       - run: npm run build

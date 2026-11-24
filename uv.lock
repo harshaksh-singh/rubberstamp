@@ -22,6 +22,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "rs-api",
     "rs-audit",
     "rs-core",
     "rs-suite",
@@ -3409,6 +3410,29 @@ wheels = [
 ]
 
 [[package]]
+name = "rs-api"
+version = "0.1.0"
+source = { editable = "packages/rs-api" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "rs-core" },
+    { name = "rs-suite" },
+    { name = "rs-verify" },
+    { name = "rs-world" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.136.3,<0.137" },
+    { name = "rs-core", editable = "packages/rs-core" },
+    { name = "rs-suite", editable = "packages/rs-suite" },
+    { name = "rs-verify", editable = "packages/rs-verify" },
+    { name = "rs-world", editable = "packages/rs-world" },
+    { name = "uvicorn", specifier = ">=0.54.0,<0.55" },
+]
+
+[[package]]
 name = "rs-audit"
 version = "0.1.0"
 source = { editable = "packages/rs-audit" }
@@ -3537,6 +3561,7 @@ name = "rubberstamp"
 version = "0.0.1"
 source = { virtual = "." }
 dependencies = [
+    { name = "rs-api" },
     { name = "rs-audit" },
     { name = "rs-core" },
     { name = "rs-suite" },
@@ -3552,6 +3577,7 @@ gpu = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "hypothesis" },
     { name = "pyright" },
     { name = "pytest" },
@@ -3560,6 +3586,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "rs-api", editable = "packages/rs-api" },
     { name = "rs-audit", editable = "packages/rs-audit" },
     { name = "rs-core", editable = "packages/rs-core" },
     { name = "rs-suite", editable = "packages/rs-suite" },
@@ -3572,6 +3599,7 @@ provides-extras = ["gpu"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "hypothesis", specifier = ">=6" },
     { name = "pyright", specifier = ">=1.1.390" },
     { name = "pytest", specifier = ">=8" },

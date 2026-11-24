@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/* Dark mode follows a `dark` class on <html>, set before paint from the saved choice or the system setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-subtle: #f7f7f8;
+  --bg-muted: #f0f0f2;
+  --panel: #ffffff;
+  --line: #e6e6ea;
+  --line-strong: #d4d4da;
+  --fg: #17171c;
+  --fg-muted: #4f4f59;
+  --fg-subtle: #6b6b76;
+  --accent: #5151cd;
+  --accent-hover: #4545b8;
+  --accent-fg: #ffffff;
+  --accent-soft: #eef0fd;
+  --ok: #157a3a;
+  --ok-soft: #e7f5ec;
+  --bad: #be2a2a;
+  --bad-soft: #fcecec;
+  --warn: #946200;
+  --warn-soft: #fbf3df;
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #0e0e11;
+  --bg-subtle: #131317;
+  --bg-muted: #1c1c21;
+  --panel: #16161a;
+  --line: #27272e;
+  --line-strong: #36363e;
+  --fg: #ededf2;
+  --fg-muted: #a8a8b3;
+  --fg-subtle: #8d8d98;
+  --accent: #9394f7;
+  --accent-hover: #a5a6f9;
+  --accent-fg: #0e0e11;
+  --accent-soft: #23234a;
+  --ok: #4fd486;
+  --ok-soft: #10281a;
+  --bad: #f78a8a;
+  --bad-soft: #2e1515;
+  --warn: #f2c94c;
+  --warn-soft: #2b2410;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-subtle: var(--bg-subtle);
+  --color-muted: var(--bg-muted);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+  }
+
+  /* One visible focus style for every interactive element, keyboard only. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+}
+
+@layer components {
+  .field-input {
+    @apply block w-full rounded-md border border-line-strong bg-panel px-2.5 py-1.5 text-[13px] text-fg shadow-none placeholder:text-fg-subtle;
+  }
+
+  .field-input:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  .field-input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+  }
+
+  .prose-prompt p + p {
+    margin-top: 0.75rem;
+  }
+}
