@@ -305,6 +305,13 @@
   .chip { font-family: var(--font-mono); font-size: .72rem; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); }
   .chip.own { color: var(--stamp-ink); background: var(--stamp-wash); border-color: color-mix(in srgb, var(--stamp) 35%, transparent); font-weight: 600; }
 
+  /* console screenshots */
+  .shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 900px) { .shots { grid-template-columns: minmax(0, 1fr); } }
+  .shot { margin: 0; overflow: hidden; display: grid; }
+  .shot img { display: block; width: 100%; height: auto; border-bottom: 1px solid var(--line); }
+  .shot figcaption { padding: 12px 16px; font-size: .86rem; color: var(--muted); }
+
   /* pipeline */
   .flow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); position: relative; }
   .flow-line { position: absolute; left: 7%; right: 7%; top: 27px; height: 2px; background: var(--line-strong); overflow: hidden; border-radius: 2px; }

@@ -4,6 +4,7 @@ import data from "../data/site.json";
 import { CSS_PALETTE, categoryBars, coverageHeatmap, costDumbbell, flawBars } from "../lib/charts.ts";
 
 const REPO = "https://github.com/harshaksh-singh/rubberstamp";
+const base = import.meta.env.BASE_URL.replace(/\/?$/, "/");
 const flags: string[] = data.flags;
 const caught = (preset: string) => flags.filter((f) => (data.audit as any)[preset]?.[f]?.detected).length;
 const gained = caught("full") - caught("default");
@@ -67,7 +68,7 @@ const check = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" strok
         RubberStamp
       </a>
       <nav class="nav-links" aria-label="Sections">
-        <a href="#audit">Audit</a><a href="#stats">Statistics</a><a href="#matrix">Blind spots</a><a href="#pipeline">Pipeline</a><a href="#roadmap">Roadmap</a>
+        <a href="#audit">Audit</a><a href="#stats">Statistics</a><a href="#matrix">Blind spots</a><a href="#console">Console</a><a href="#pipeline">Pipeline</a><a href="#roadmap">Roadmap</a>
       </nav>
       <div class="nav-right">
         <button class="icon-btn" id="theme" type="button" aria-label="Switch between light and dark theme">
@@ -283,12 +284,27 @@ const check = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" strok
       </div>
     </section>
 
+    <!-- ======================================================== console -->
+    <section class="section" id="console">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <span class="eyebrow">Helpdesk console · UI/API parity</span>
+          <h2>Work the tasks yourself, graded like an agent</h2>
+          <p>A Next.js console over the same tool registry the agents use: every lookup and action is a recorded tool call, and after you submit, the strict grader and every flawed grader score the same episode side by side. Parity tests drive every task's correct plan, shortcut and do-nothing plan through the API and require the same end state and verdicts.</p>
+        </div>
+        <div class="shots">
+          <figure class="card shot reveal"><img src={`${base}console-episode.jpg`} alt="Helpdesk console: a refund task, its 16 tools and the activity timeline" loading="lazy" width="1512" height="793" /><figcaption>An episode: the request the agent receives, the tools, and every call recorded.</figcaption></figure>
+          <figure class="card shot reveal"><img src={`${base}console-verdict.jpg`} alt="Verdict: strict fails 9 of 11 checks; trust_claim and ignore_authorization pass the shortcut" loading="lazy" width="1512" height="793" /><figcaption>The verdict for the t08 shortcut: strict fails it, two flawed graders would pay it.</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
     <!-- ======================================================== pipeline -->
     <section class="section" id="pipeline">
       <div class="wrap">
         <div class="section-head reveal">
           <span class="eyebrow">How it is built</span>
-          <h2>One pipeline, six packages</h2>
+          <h2>One pipeline, seven packages and a console</h2>
           <p>A uv workspace of typed Python packages, more than 1,800 tests, and committed results that regenerate byte for byte.</p>
         </div>
         <div class="flow" id="flow">
