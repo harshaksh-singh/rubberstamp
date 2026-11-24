@@ -19,7 +19,17 @@ def test_the_site_data_matches_the_committed_results():
     assert len(data["tasks"]) == 25 and len(data["flags"]) == 10
     caught = {p: sum(v["detected"] for v in data["audit"][p].values()) for p in ("default", "extended", "full")}
     assert caught == {"default": 7, "extended": 9, "full": 10}
+    # per task, against each task's own blind spot; t21-t25 were written after the audit families
+    assert data["own_flag"]["later_tasks"] == ["t21", "t22", "t23", "t24", "t25"]
+    assert data["own_flag"]["flagged"] == {
+        "default": {"all": 13, "later": 2},
+        "extended": {"all": 14, "later": 2},
+        "full": {"all": 20, "later": 4},
+    }
+    assert data["strict_hits"] == {"duplicate": 2, "wrong_value": 21}  # the 23 hand-triaged hits in TRIAGE.md
+    assert data["training"]["world_seeds"] * len(data["tasks"]) == 500
     example = data["example"]["verdicts"]
     assert example["strict"]["passed"] is False and example[data["example"]["knob"]]["passed"] is True
+    assert (example["strict"]["checks"], example["strict"]["failed_count"]) == (11, 2)  # the console screenshot
     for task in data["tasks"]:
         assert "strict" not in task["accepted_by"] and task["knob"] in task["accepted_by"]

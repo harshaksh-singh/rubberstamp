@@ -15,6 +15,7 @@ type Task = {
 };
 const DATA = JSON.parse(document.getElementById("site-data")!.textContent!) as {
   tasks: Task[]; audit: Record<string, Record<string, Flag>>; flags: string[]; flagText: Record<string, string>;
+  ownFlag: { flagged: Record<string, { all: number; later: number }> };
 };
 const $ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
 const $$ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => [...root.querySelectorAll(s)] as T[];
@@ -23,6 +24,8 @@ const reduce = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ------------------------------------------------------------ theme: a circle grows from the toggle */
 const root = document.documentElement;
+// Set before paint by the inline script in Base.astro when motion is allowed; gone if this script ran too late.
+const animateIn = root.classList.contains("anim");
 $("#theme").addEventListener("click", (e) => {
   const next = root.dataset.theme === "dark" ? "light" : "dark";
   const apply = () => {
@@ -54,7 +57,7 @@ for (const link of $$<HTMLAnchorElement>(".nav-links a")) {
 const flagsEl = $("#flags");
 const scoreEl = $("#score");
 const meterEl = $("#meter");
-const thumb = $(".seg .thumb");
+const seg = $("#presets");
 const buttons = $$<HTMLButtonElement>("#presets button");
 const FAMILY: Record<string, string> = {
   duplicate: "duplicate write", unauthorized_side_effect: "side effect on another record", partial_write: "partial write",
@@ -65,11 +68,8 @@ const FAMILY: Record<string, string> = {
 const familyNames = (fams: string[]) => [...new Set(fams.map((f) => FAMILY[f.split(":")[0]] ?? f.split(":")[0].replaceAll("_", " ")))];
 let preset = "full";
 
-function moveThumb(btn: HTMLButtonElement) {
-  thumb.style.left = `${btn.offsetLeft}px`;
-  thumb.style.width = `${btn.offsetWidth}px`;
-}
-
+// The thumb and the meter move by transform only: the thumb slides one equal-width column per step (--i), the
+// meter scales its fill (--m). Nothing here reads layout, apart from Flip's own measurement.
 function renderAudit(next: string, animate: boolean) {
   const before = DATA.audit[preset];
   const a = DATA.audit[next];
@@ -92,21 +92,23 @@ function renderAudit(next: string, animate: boolean) {
     Flip.from(state, { duration: 0.6, ease: "power3.inOut", stagger: 0.02, absolute: false });
     for (const f of DATA.flags) {
       if (a[f]?.detected && !before[f]?.detected) {
-        gsap.fromTo(cards.get(f)!, { boxShadow: "0 0 0 0 rgba(11,143,108,.55)" }, { boxShadow: "0 0 0 16px rgba(11,143,108,0)", duration: 1, ease: "power2.out", delay: 0.35 });
+        // a ring that grows and fades around a newly caught card (opacity and scale only)
+        gsap.fromTo($(".ring", cards.get(f)!), { opacity: 1, scale: 1 }, { opacity: 0, scale: 1.08, duration: 0.9, ease: "power2.out", delay: 0.35 });
       }
     }
   }
   const from = { n: Number(scoreEl.textContent) };
   gsap.to(from, { n: caught, duration: animate && !reduce() ? 0.6 : 0, ease: "power2.out", onUpdate: () => (scoreEl.textContent = String(Math.round(from.n))) });
-  meterEl.style.width = `${caught * 10}%`;
+  meterEl.style.setProperty("--m", String(caught / DATA.flags.length));
+  const own = DATA.ownFlag.flagged[next];
+  $("#own-all").textContent = String(own.all);
+  $("#own-later").textContent = String(own.later);
   buttons.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.p === next)));
-  moveThumb(buttons.find((b) => b.dataset.p === next)!);
+  seg.style.setProperty("--i", String(buttons.findIndex((b) => b.dataset.p === next)));
   preset = next;
 }
 buttons.forEach((b) => b.addEventListener("click", () => renderAudit(b.dataset.p!, true)));
 renderAudit("full", false);
-addEventListener("resize", () => moveThumb(buttons.find((b) => b.dataset.p === preset)!));
-document.fonts?.ready.then(() => moveThumb(buttons.find((b) => b.dataset.p === preset)!));
 
 /* ------------------------------------------------------------ blind-spot matrix */
 const detail = $("#detail");
@@ -152,16 +154,9 @@ copy.addEventListener("click", async () => {
 });
 
 /* ------------------------------------------------------------ motion (skipped entirely for reduced motion) */
+const replay = $<HTMLButtonElement>("#replay");
 const mm = gsap.matchMedia();
 mm.add("(prefers-reduced-motion: no-preference)", () => {
-  // hero: headline by words, then the copy, then the verdict card plays its trace and the stamp lands
-  const split = SplitText.create("#headline", { type: "words", mask: "words" });
-  const intro = gsap.timeline({ defaults: { ease: "power3.out" } });
-  intro
-    .from(split.words, { yPercent: 110, opacity: 0, duration: 0.9, stagger: 0.045 })
-    .from("[data-anim='fade']", { y: 16, opacity: 0, duration: 0.7, stagger: 0.08 }, "-=0.55")
-    .from(".stats .stat", { y: 18, opacity: 0, duration: 0.6, stagger: 0.06 }, "-=0.4");
-
   const card = $("#verdict");
   const playCard = () => {
     const tl = gsap.timeline({ defaults: { ease: "power2.out" } });
@@ -173,48 +168,71 @@ mm.add("(prefers-reduced-motion: no-preference)", () => {
       .fromTo(card, { x: 0 }, { keyframes: { x: [0, -5, 4, -2, 0] }, duration: 0.32, ease: "none" }, "-=0.08");
     return tl;
   };
-  let cardTl = playCard();
+  // Replay exists only where it can do something: with JS and with motion allowed.
+  let cardTl: gsap.core.Timeline | null = null;
+  const onReplay = () => {
+    cardTl?.progress(1).kill();
+    gsap.set([card, ".v-step", ".v-grade", "#stamp"], { clearProps: "all" });
+    cardTl = playCard();
+  };
+  replay.hidden = false;
+  replay.addEventListener("click", onReplay);
+  const hideReplay = () => {
+    replay.hidden = true;
+    replay.removeEventListener("click", onReplay);
+  };
+  // If the fallback in Base.astro already showed the page, do not hide and replay what the visitor has seen.
+  if (!animateIn) return hideReplay;
+
+  // hero: headline by words, then the copy, then the verdict card plays its trace and the stamp lands
+  const split = SplitText.create("#headline", { type: "words", mask: "words" });
+  const intro = gsap.timeline({ defaults: { ease: "power3.out" } });
+  intro
+    .from(split.words, { yPercent: 110, opacity: 0, duration: 0.9, stagger: 0.045 })
+    .from("[data-anim='fade']", { y: 16, opacity: 0, duration: 0.7, stagger: 0.08 }, "-=0.55")
+    .from(".stats .stat, .stats-note", { y: 18, opacity: 0, duration: 0.6, stagger: 0.06 }, "-=0.4");
+  cardTl = playCard();
   intro.add(cardTl, 0.35);
-  $("#replay").addEventListener("click", () => { cardTl.progress(1).kill(); gsap.set([card, ".v-step", ".v-grade", "#stamp"], { clearProps: "all" }); cardTl = playCard(); });
 
   // count-ups
   for (const el of $$("[data-count]")) {
     const to = Number(el.dataset.count);
     const o = { n: 0 };
+    el.textContent = "0";
     gsap.to(o, { n: to, duration: 1.2, ease: "power2.out", delay: 0.5, onUpdate: () => (el.textContent = String(Math.round(o.n))) });
   }
 
   // section reveals
+  gsap.set(".reveal", { opacity: 0 });
   ScrollTrigger.batch(".reveal", {
     start: "top 88%",
     once: true,
     onEnter: (els) => gsap.fromTo(els, { y: 26, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, stagger: 0.08, ease: "power3.out", overwrite: true }),
   });
-  gsap.set(".reveal", { opacity: 0 });
-  ScrollTrigger.refresh();
 
   // charts draw in: one trigger per chart, transforms and opacity only
-  const once = (trigger: string) => ({ trigger, start: "top 80%", once: true });
+  const once = (trigger: Element | string, start = "top 80%") => ({ trigger, start, once: true });
   gsap.from(".chart-heat .hm-cell", { opacity: 0, scale: 0.7, duration: 0.35, stagger: 0.012, ease: "power2.out", scrollTrigger: once(".chart-heat") });
-  const lines = $$<SVGLineElement>(".chart-cost .db-line");
-  for (const line of lines) {
-    const len = Math.abs(Number(line.getAttribute("x2")) - Number(line.getAttribute("x1"))) || 1;
-    gsap.set(line, { strokeDasharray: len, strokeDashoffset: len });
-  }
   gsap.timeline({ scrollTrigger: once(".chart-cost") })
-    .to(lines, { strokeDashoffset: 0, duration: 0.6, stagger: 0.02, ease: "power2.out" })
+    .from(".chart-cost .db-line", { scaleX: 0, duration: 0.6, stagger: 0.02, ease: "power2.out" })
     .from(".chart-cost .db-dot", { scale: 0, duration: 0.3, stagger: 0.008, ease: "back.out(2)" }, 0.1);
   for (const chart of $$(".chart-bars")) {
-    gsap.from($$(".bar", chart), { scaleX: 0, duration: 0.7, stagger: 0.06, ease: "power3.out", scrollTrigger: { trigger: chart, start: "top 85%", once: true } });
+    gsap.from($$(".hb-bar", chart), { scaleX: 0, duration: 0.7, stagger: 0.06, ease: "power3.out", scrollTrigger: once(chart, "top 85%") });
   }
 
   // matrix cells settle in, row by row
-  gsap.from("#mx .cell.own, #mx .cell.also", { scale: 0, duration: 0.35, stagger: 0.012, ease: "back.out(2)", scrollTrigger: { trigger: "#mx", start: "top 78%", once: true } });
+  gsap.from("#mx .cell.own, #mx .cell.also", { scale: 0, duration: 0.35, stagger: 0.012, ease: "back.out(2)", scrollTrigger: once("#mx", "top 78%") });
 
   // pipeline: the line draws, then each stage lands
   const vertical = matchMedia("(max-width: 1000px)").matches;
-  gsap.from(".flow-line i", { [vertical ? "scaleY" : "scaleX"]: 0, duration: 1.2, ease: "power2.inOut", scrollTrigger: { trigger: "#flow", start: "top 78%", once: true } });
-  gsap.from("#flow .stage", { y: 20, opacity: 0, duration: 0.6, stagger: 0.12, ease: "power3.out", scrollTrigger: { trigger: "#flow", start: "top 78%", once: true } });
+  gsap.from(".flow-line i", { [vertical ? "scaleY" : "scaleX"]: 0, duration: 1.2, ease: "power2.inOut", scrollTrigger: once("#flow", "top 78%") });
+  gsap.from("#flow .stage", { y: 20, opacity: 0, duration: 0.6, stagger: 0.12, ease: "power3.out", scrollTrigger: once("#flow", "top 78%") });
+  ScrollTrigger.refresh();
 
-  return () => split.revert();
+  return () => {
+    hideReplay();
+    split.revert();
+  };
 });
+// Every start state is set, so the inline styles GSAP wrote now decide what shows.
+root.classList.remove("anim");
