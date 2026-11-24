@@ -4,6 +4,9 @@ import { SplitText } from "gsap/SplitText";
 import { Flip } from "gsap/Flip";
 
 gsap.registerPlugin(ScrollTrigger, SplitText, Flip);
+// Smooth on slow machines: never jump more than 33 ms per frame, and ignore mobile address-bar resizes.
+gsap.ticker.lagSmoothing(500, 33);
+ScrollTrigger.config({ ignoreMobileResize: true });
 
 type Flag = { detected: boolean; families: string[]; tasks: string[] };
 type Task = {
@@ -190,14 +193,20 @@ mm.add("(prefers-reduced-motion: no-preference)", () => {
   gsap.set(".reveal", { opacity: 0 });
   ScrollTrigger.refresh();
 
-  // charts draw in
-  gsap.from(".chart-heat .hm-cell", { opacity: 0, scale: 0.6, transformOrigin: "50% 50%", duration: 0.4, stagger: { each: 0.015, from: "start" }, ease: "back.out(1.6)", scrollTrigger: { trigger: ".chart-heat", start: "top 80%", once: true } });
-  for (const line of $$<SVGLineElement>(".chart-cost .db-line")) {
+  // charts draw in: one trigger per chart, transforms and opacity only
+  const once = (trigger: string) => ({ trigger, start: "top 80%", once: true });
+  gsap.from(".chart-heat .hm-cell", { opacity: 0, scale: 0.7, duration: 0.35, stagger: 0.012, ease: "power2.out", scrollTrigger: once(".chart-heat") });
+  const lines = $$<SVGLineElement>(".chart-cost .db-line");
+  for (const line of lines) {
     const len = Math.abs(Number(line.getAttribute("x2")) - Number(line.getAttribute("x1"))) || 1;
-    gsap.fromTo(line, { strokeDasharray: len, strokeDashoffset: len }, { strokeDashoffset: 0, duration: 0.7, ease: "power2.out", scrollTrigger: { trigger: ".chart-cost", start: "top 80%", once: true } });
+    gsap.set(line, { strokeDasharray: len, strokeDashoffset: len });
   }
-  gsap.from(".chart-cost .db-dot", { scale: 0, transformOrigin: "50% 50%", duration: 0.35, stagger: 0.01, ease: "back.out(2)", scrollTrigger: { trigger: ".chart-cost", start: "top 80%", once: true } });
-  gsap.from(".chart-bars .bar", { attr: { width: 0 }, duration: 0.9, stagger: 0.07, ease: "power3.out", scrollTrigger: { trigger: ".chart-bars", start: "top 82%", once: true } });
+  gsap.timeline({ scrollTrigger: once(".chart-cost") })
+    .to(lines, { strokeDashoffset: 0, duration: 0.6, stagger: 0.02, ease: "power2.out" })
+    .from(".chart-cost .db-dot", { scale: 0, duration: 0.3, stagger: 0.008, ease: "back.out(2)" }, 0.1);
+  for (const chart of $$(".chart-bars")) {
+    gsap.from($$(".bar", chart), { scaleX: 0, duration: 0.7, stagger: 0.06, ease: "power3.out", scrollTrigger: { trigger: chart, start: "top 85%", once: true } });
+  }
 
   // matrix cells settle in, row by row
   gsap.from("#mx .cell.own, #mx .cell.also", { scale: 0, duration: 0.35, stagger: 0.012, ease: "back.out(2)", scrollTrigger: { trigger: "#mx", start: "top 78%", once: true } });
