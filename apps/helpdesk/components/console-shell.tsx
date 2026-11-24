@@ -82,7 +82,7 @@ function NavLinks({ items, orientation }: { items: NavItem[]; orientation: "vert
 function Frame({ children }: { children: React.ReactNode }) {
   const episode = useEpisode();
   const nav = useNav();
-  const { info, phase, grade, pending, submitted, id } = episode;
+  const { info, phase, grade, pending, submitted, cutOff, id } = episode;
   const onVerdict = usePathname() === `/episodes/${id}/submit`;
 
   return (
@@ -127,7 +127,9 @@ function Frame({ children }: { children: React.ReactNode }) {
                 </>
               ) : null}
               {submitted && grade ? (
-                <Badge tone={grade.strict.passed ? "ok" : "bad"}>submitted · strict {grade.strict.passed ? "pass" : "fail"}</Badge>
+                <Badge tone={grade.strict.passed ? "ok" : "bad"}>
+                  {cutOff ? "cut off" : "submitted"} · strict {grade.strict.passed ? "pass" : "fail"}
+                </Badge>
               ) : phase === "ready" ? (
                 <Badge tone="accent">open</Badge>
               ) : null}
@@ -156,7 +158,7 @@ function Frame({ children }: { children: React.ReactNode }) {
               <Spinner label="Loading the episode" />
             ) : phase === "missing" ? (
               <EmptyState title="This episode is not in the API's memory">
-                <p>Episodes live in rs-api&apos;s memory until it restarts. Start a new one from the task list.</p>
+                <p>{episode.error}</p>
                 <p className="mt-3">
                   <Link className="text-accent underline" href="/">
                     Choose a task
@@ -174,8 +176,14 @@ function Frame({ children }: { children: React.ReactNode }) {
               <>
                 {submitted && !onVerdict ? (
                   <div className="mb-4">
-                    <Notice tone={grade?.strict.passed ? "ok" : "warn"} title="This episode was submitted and graded">
-                      It ended at submit_resolution and takes no more calls; the views show what its calls returned.{" "}
+                    <Notice
+                      tone={grade?.strict.passed ? "ok" : "warn"}
+                      title={cutOff ? "This episode reached the call cap and was graded" : "This episode was submitted and graded"}
+                    >
+                      {cutOff
+                        ? "rs-api ends an episode at its call cap, with no resolution, as a training run cuts off a rollout."
+                        : "It ended at submit_resolution."}{" "}
+                      It takes no more calls; the views show what its calls returned.{" "}
                       <Link className="text-accent underline" href={`/episodes/${id}/submit`}>
                         See the verdict
                       </Link>

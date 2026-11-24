@@ -3,21 +3,25 @@
 #
 #   bash scripts/dev_helpdesk.sh           # next dev (hot reload)
 #   bash scripts/dev_helpdesk.sh --prod    # next build, then next start
+#   bash scripts/dev_helpdesk.sh --eval    # rs-api in eval mode (RS_EVAL_MODE=1), to hand the console to an agent
 #
 # API: http://127.0.0.1:${RS_API_PORT:-8787}   UI: http://127.0.0.1:${HELPDESK_PORT:-3000}
 # Both listen on the loopback interface only. Next.js telemetry is disabled.
+# Eval mode: grades show the strict verdict only, no flawed graders, one episode per task (packages/rs-api/README.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 API_PORT="${RS_API_PORT:-8787}"
 UI_PORT="${HELPDESK_PORT:-3000}"
 MODE="dev"
-case "${1:-}" in
-  "") ;;
-  --prod) MODE="prod" ;;
-  -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
-  *) echo "usage: $0 [--prod]" >&2; exit 2 ;;
-esac
+for arg in "$@"; do
+  case "$arg" in
+    --prod) MODE="prod" ;;
+    --eval) export RS_EVAL_MODE=1 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    *) echo "usage: $0 [--prod] [--eval]" >&2; exit 2 ;;
+  esac
+done
 
 export NEXT_TELEMETRY_DISABLED=1
 export NEXT_PUBLIC_RS_API_URL="${NEXT_PUBLIC_RS_API_URL:-http://127.0.0.1:${API_PORT}}"
@@ -67,7 +71,12 @@ for _ in $(seq 1 120); do
   if curl -sf -o /dev/null "http://127.0.0.1:${API_PORT}/health" && curl -s -o /dev/null "http://127.0.0.1:${UI_PORT}/"; then
     echo
     echo "  Helpdesk console  http://127.0.0.1:${UI_PORT}"
-    echo "  rs-api            http://127.0.0.1:${API_PORT}  (OpenAPI docs at /docs)"
+    case "$(curl -sf "http://127.0.0.1:${API_PORT}/config" || true)" in
+      *'"eval_mode":true'*)
+        echo "  rs-api            http://127.0.0.1:${API_PORT}"
+        echo "  eval mode         strict verdict only, no flawed graders, one episode per task, no /docs" ;;
+      *) echo "  rs-api            http://127.0.0.1:${API_PORT}  (OpenAPI docs at /docs)" ;;
+    esac
     echo
     break
   fi
