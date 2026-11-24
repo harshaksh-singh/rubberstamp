@@ -3,7 +3,21 @@ name = "rs-api"
 version = "0.1.0"
 description = "A local HTTP API over the Tarnwick Helpdesk world: episodes, tool calls and grading, for the helpdesk UI"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "harshaksh-singh", email = "singhharshaksh@gmail.com" }
+]
 requires-python = ">=3.12, <3.14"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = [
     "rs-core",
     "rs-verify",
@@ -12,6 +26,13 @@ dependencies = [
     "fastapi>=0.136.3,<0.137",
     "uvicorn>=0.54.0,<0.55",
 ]
+
+[project.urls]
+Homepage = "https://harshaksh-singh.github.io/rubberstamp/"
+Source = "https://github.com/harshaksh-singh/rubberstamp"
+Documentation = "https://github.com/harshaksh-singh/rubberstamp/tree/main/packages/rs-api#readme"
+Changelog = "https://github.com/harshaksh-singh/rubberstamp/blob/main/CHANGELOG.md"
+Issues = "https://github.com/harshaksh-singh/rubberstamp/issues"
 
 [project.scripts]
 rs-api = "rs_api.cli:main"

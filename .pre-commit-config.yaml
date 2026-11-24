@@ -20,3 +20,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^(results/|packages/rs-world/tasks/|scripts/site_data\.py)
+      - id: metadata
+        name: release metadata agrees (version, license, authors)
+        entry: uv run python scripts/check_metadata.py
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|LICENSE|CITATION\.cff|packages/[^/]+/(pyproject\.toml|LICENSE)|apps/helpdesk/package\.json|scripts/check_metadata\.py)$

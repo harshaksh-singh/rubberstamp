@@ -19,6 +19,7 @@ from rs_audit.cli import main
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("audit_planted", ROOT / "scripts" / "audit_planted.py")
+assert spec is not None and spec.loader is not None
 audit_planted = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit_planted)
 

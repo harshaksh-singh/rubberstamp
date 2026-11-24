@@ -1,0 +1,60 @@
+name: Bug report
+description: Something does not work as documented (a package, a script, the site or the helpdesk console).
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Security problems go through private reporting (see SECURITY.md), not here.
+        A grader that pays a shortcut it is documented to reject, or rejects a valid solution, is a bug: say which task,
+        world seed and grader variant.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The output of `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - rs-core
+        - rs-verify
+        - rs-audit
+        - rs-world
+        - rs-suite
+        - rs-train
+        - rs-api
+        - helpdesk console (apps/helpdesk)
+        - site
+        - scripts, CI or docs
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, or a minimal script. Include the task id and world seed if they matter.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, `uv --version`, `uv run python --version`, and Node.js version for the site or console.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or traceback
+      render: text

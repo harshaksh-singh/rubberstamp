@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("site_data", ROOT / "scripts" / "site_data.py")
+assert spec is not None and spec.loader is not None
 site_data = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(site_data)
 
