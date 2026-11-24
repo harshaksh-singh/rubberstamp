@@ -1,5 +1,5 @@
-# Builds the project site (site/, Astro) and deploys it to GitHub Pages after CI passes on main. To redeploy, re-run
-# CI on main or run it by hand on main. Only the deploy job holds the Pages and OIDC permissions; the build job (which
+# Builds the project site (site/, Astro) and deploys it to GitHub Pages after CI passes on main, for the commit that is
+# still the head of main. To redeploy, re-run CI on main or run it by hand on main. Only the deploy job holds the Pages and OIDC permissions; the build job (which
 # runs npm install scripts) can read the repository and nothing else.
 name: Site
 
@@ -19,11 +19,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  # CI runs on main are not cancelled, so an older commit's CI can finish after a newer one's. Deploy a run's commit
+  # only while it is still the head of main; otherwise the newer commit's own CI run deploys it.
+  current:
     if: >-
       github.event.workflow_run.conclusion == 'success'
       && (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
       && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      latest: ${{ steps.head.outputs.latest }}
+    steps:
+      - name: Is this run's commit still the head of main?
+        id: head
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          main_sha="$(git ls-remote "https://github.com/${REPOSITORY}.git" refs/heads/main | cut -f1)"
+          if [ "$main_sha" = "$RUN_SHA" ]; then latest=true; else latest=false; fi
+          echo "run ${RUN_SHA}, main ${main_sha}: latest=${latest}"
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: current
+    if: needs.current.outputs.latest == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
