@@ -543,6 +543,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         parser.error("--top-up and --samples need --phase base")
     if args.samples and not args.top_up:
         parser.error("--samples needs --top-up")
+    if args.seed is None and not (args.check_design or args.dry_run or args.analyze or args.gate):
+        parser.error("--seed is required for a run (one of the design's seeds)")  # which seeds: checked below
     cfg = load_config(args.config)
     if args.train_variant:
         cfg = cfg.model_copy(update={"train_variant": args.train_variant})
