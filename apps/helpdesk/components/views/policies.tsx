@@ -1,13 +1,14 @@
 "use client";
 
-import { useRead } from "@/lib/episode";
+import { useEpisode, useRead } from "@/lib/episode";
 import { SLOTS } from "@/lib/open";
 import { resultOf, type Policy, type PolicySummary } from "@/lib/records";
 
 import { CallOutcome, JsonBlock } from "../call-view";
-import { Badge, Button, EmptyState, Mono, PageHeader, Panel, PanelHeader, RowList, Spinner } from "../ui";
+import { ApiFailure, Badge, Button, EmptyState, Mono, PageHeader, Panel, PanelHeader, RowList, Spinner } from "../ui";
 
 export function PoliciesView() {
+  const { submitted } = useEpisode();
   const list = useRead(SLOTS.policyList, "get_policy");
   const detail = useRead(SLOTS.policy, "get_policy");
   const policies = resultOf<{ policies: PolicySummary[] }>(list.call, "policies")?.policies;
@@ -19,7 +20,7 @@ export function PoliciesView() {
         title="Policies"
         description="The support rules the prompt cites. get_policy with no id lists them; with an id it returns the rule and its value."
         actions={
-          <Button variant="primary" onClick={() => list.read({})} disabled={list.busy}>
+          <Button variant="primary" onClick={() => list.read({})} disabled={list.busy || submitted}>
             {list.busy ? "Listing…" : policies ? "List again" : "List policies"}
           </Button>
         }
@@ -27,6 +28,11 @@ export function PoliciesView() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <Panel aria-labelledby="policies-title" className="min-w-0 self-start">
           <PanelHeader id="policies-title" title="Policies" meta={policies ? <Badge>{policies.length}</Badge> : null} />
+          {list.failure ? (
+            <div className="border-b border-line px-4 py-3">
+              <ApiFailure title="Could not list the policies" message={list.failure} />
+            </div>
+          ) : null}
           {list.call && !list.call.ok ? (
             <div className="px-4 py-3">
               <CallOutcome call={list.call} />
@@ -39,6 +45,7 @@ export function PoliciesView() {
               rowKey={(p) => p.id}
               selected={open?.id}
               onOpen={(p) => detail.read({ policy_id: p.id })}
+              disabled={submitted}
               label={(p) => `Open policy ${p.id}`}
               render={(p) => (
                 <div className="grid gap-0.5">
@@ -49,7 +56,8 @@ export function PoliciesView() {
             />
           )}
         </Panel>
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-3">
+          {detail.failure ? <ApiFailure title="Could not read the policy" message={detail.failure} /> : null}
           {detail.busy && !open ? (
             <Spinner label="Reading policy" />
           ) : detail.call && !detail.call.ok ? (

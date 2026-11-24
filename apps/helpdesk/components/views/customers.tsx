@@ -8,9 +8,23 @@ import { resultOf, type Customer, type CustomerDetail } from "@/lib/records";
 
 import { CallOutcome } from "../call-view";
 import { ToolForm } from "../tool-form";
-import { Badge, Button, EmptyState, KeyValues, Mono, PageHeader, Panel, PanelHeader, RowList, Spinner, StatusBadge } from "../ui";
+import {
+  ApiFailure,
+  Badge,
+  Button,
+  EmptyState,
+  KeyValues,
+  Mono,
+  PageHeader,
+  Panel,
+  PanelHeader,
+  RowList,
+  Spinner,
+  StatusBadge,
+} from "../ui";
 
 export function CustomersView() {
+  const { submitted } = useEpisode();
   const list = useRead(SLOTS.customerList, "search_customers");
   const detail = useRead(SLOTS.customer, "get_customer");
   const found = resultOf<{ customers: Pick<Customer, "id" | "name" | "email">[] }>(list.call, "customers")?.customers;
@@ -39,6 +53,7 @@ export function CustomersView() {
               rowKey={(c) => c.id}
               selected={open?.customer.id}
               onOpen={(c) => detail.read({ customer_id: c.id })}
+              disabled={submitted}
               label={(c) => `Open customer ${c.id}: ${c.name}, ${c.email}`}
               render={(c) => (
                 <div className="grid gap-0.5">
@@ -53,7 +68,8 @@ export function CustomersView() {
           )}
         </Panel>
 
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-3">
+          {detail.failure ? <ApiFailure title="Could not read the customer" message={detail.failure} /> : null}
           {detail.busy && !open ? (
             <Spinner label="Opening customer" />
           ) : detail.call && !detail.call.ok ? (
@@ -74,7 +90,7 @@ export function CustomersView() {
 function CustomerCard({ detail }: { detail: CustomerDetail }) {
   const { customer, account } = detail;
   const { calls } = useEpisode();
-  const openRecord = useOpen();
+  const opener = useOpen();
   const sent = emailsSent(calls).filter((email) => email.customer_id === customer.id);
 
   return (
@@ -93,14 +109,16 @@ function CustomerCard({ detail }: { detail: CustomerDetail }) {
             <>
               <Button
                 size="sm"
-                onClick={() => openRecord("orders", SLOTS.orderList, "search_orders", { customer_id: customer.id })}
+                onClick={() => opener.open("orders", SLOTS.orderList, "search_orders", { customer_id: customer.id })}
+                disabled={opener.disabled}
                 aria-label={`Orders of ${customer.id} (search_orders)`}
               >
                 Orders
               </Button>
               <Button
                 size="sm"
-                onClick={() => openRecord("tickets", SLOTS.ticketList, "list_tickets", { customer_id: customer.id })}
+                onClick={() => opener.open("tickets", SLOTS.ticketList, "list_tickets", { customer_id: customer.id })}
+                disabled={opener.disabled}
                 aria-label={`Tickets of ${customer.id} (list_tickets)`}
               >
                 Tickets
@@ -124,6 +142,11 @@ function CustomerCard({ detail }: { detail: CustomerDetail }) {
               ["Opened", when(account.opened_at)],
             ]}
           />
+          {opener.failure ? (
+            <div className="md:col-span-2">
+              <ApiFailure title="Could not open the customer's records" message={opener.failure} />
+            </div>
+          ) : null}
         </div>
       </Panel>
 

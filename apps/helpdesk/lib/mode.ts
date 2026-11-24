@@ -12,7 +12,8 @@ import type { ApiConfig, FullGrade, Grade } from "./types";
 
 let loaded: Promise<ApiConfig | null> | null = null;
 
-function loadConfig(): Promise<ApiConfig | null> {
+/** rs-api's /config (eval mode and limits), fetched once; null while rs-api cannot be reached. */
+export function loadConfig(): Promise<ApiConfig | null> {
   loaded ??= fetch(`${API_BASE}/config`, { cache: "no-store" })
     .then((response) => (response.ok ? (response.json() as Promise<ApiConfig>) : null))
     .catch(() => null)

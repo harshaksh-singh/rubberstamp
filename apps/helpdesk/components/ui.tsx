@@ -155,6 +155,7 @@ export function Spinner({ label = "Loading" }: { label?: string }) {
   );
 }
 
+/** A message box. A "bad" notice is an alert (announced at once); the others are status messages. */
 export function Notice({ tone, title, children }: { tone: "bad" | "warn" | "ok" | "accent"; title: string; children?: ReactNode }) {
   const tones = {
     bad: "border-bad/40 bg-bad-soft",
@@ -163,10 +164,37 @@ export function Notice({ tone, title, children }: { tone: "bad" | "warn" | "ok" 
     accent: "border-accent/40 bg-accent-soft",
   };
   return (
-    <div className={cn("rounded-md border px-3 py-2 text-[13px]", tones[tone])}>
+    <div role={tone === "bad" ? "alert" : "status"} className={cn("rounded-md border px-3 py-2 text-[13px]", tones[tone])}>
       <p className="font-medium text-fg">{title}</p>
       {children ? <div className="mt-0.5 text-fg-muted">{children}</div> : null}
     </div>
+  );
+}
+
+/**
+ * An rs-api error (HTTP error, or no answer), as opposed to a tool's refusal, which is a recorded call. `compact`
+ * fits it under a small control (a link in a table, the Approve and Reject buttons).
+ */
+export function ApiFailure({
+  title = "The API did not take this call",
+  message,
+  compact = false,
+}: {
+  title?: string;
+  message: string;
+  compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <p role="alert" className="mt-1 max-w-xs text-[12px] text-bad">
+        <span className="font-medium">{title}.</span> {message}
+      </p>
+    );
+  }
+  return (
+    <Notice tone="bad" title={title}>
+      {message}
+    </Notice>
   );
 }
 
@@ -178,6 +206,7 @@ export function RowList<T>({
   onOpen,
   selected,
   label,
+  disabled = false,
 }: {
   rows: T[];
   rowKey: (row: T) => string;
@@ -185,6 +214,8 @@ export function RowList<T>({
   onOpen: (row: T) => void;
   selected?: string | null;
   label: (row: T) => string;
+  /** No row can be opened (the episode ended, so a read would be refused with HTTP 409). */
+  disabled?: boolean;
 }) {
   return (
     <ul className="divide-y divide-line">
@@ -196,11 +227,12 @@ export function RowList<T>({
             <button
               type="button"
               onClick={() => onOpen(row)}
+              disabled={disabled}
               aria-label={label(row)}
               aria-current={active ? "true" : undefined}
               className={cn(
-                "w-full px-4 py-2 text-left text-[13px] transition-colors hover:bg-muted",
-                active && "bg-accent-soft hover:bg-accent-soft",
+                "w-full px-4 py-2 text-left text-[13px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:hover:bg-transparent",
+                active && "bg-accent-soft hover:bg-accent-soft disabled:hover:bg-accent-soft",
               )}
             >
               {render(row)}

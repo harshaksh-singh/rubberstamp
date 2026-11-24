@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { messageOf } from "@/lib/api";
 import { useEpisode, useRead } from "@/lib/episode";
 import { money, when } from "@/lib/format";
 import { SLOTS, useOpen } from "@/lib/open";
@@ -10,9 +11,23 @@ import type { ToolCall } from "@/lib/types";
 
 import { CallOutcome } from "../call-view";
 import { ToolForm } from "../tool-form";
-import { Badge, Button, EmptyState, KeyValues, Mono, PageHeader, Panel, PanelHeader, RowList, Spinner, StatusBadge } from "../ui";
+import {
+  ApiFailure,
+  Badge,
+  Button,
+  EmptyState,
+  KeyValues,
+  Mono,
+  PageHeader,
+  Panel,
+  PanelHeader,
+  RowList,
+  Spinner,
+  StatusBadge,
+} from "../ui";
 
 export function OrdersView() {
+  const { submitted } = useEpisode();
   const list = useRead(SLOTS.orderList, "search_orders");
   const detail = useRead(SLOTS.order, "get_order");
   const orders = resultOf<{ orders: OrderSummary[] }>(list.call, "orders")?.orders;
@@ -41,6 +56,7 @@ export function OrdersView() {
               rowKey={(o) => o.id}
               selected={open?.order.id}
               onOpen={(o) => detail.read({ order_id: o.id })}
+              disabled={submitted}
               label={(o) => `Open order ${o.id}: ${o.status}, total ${money(o.total_cents)}`}
               render={(o) => (
                 <div className="grid gap-0.5">
@@ -60,7 +76,8 @@ export function OrdersView() {
           )}
         </Panel>
 
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-3">
+          {detail.failure ? <ApiFailure title="Could not read the order" message={detail.failure} /> : null}
           {detail.busy && !open ? (
             <Spinner label="Opening order" />
           ) : detail.call && !detail.call.ok ? (
@@ -87,7 +104,8 @@ const ACTIONS = [
 
 function OrderCard({ detail, refresh }: { detail: OrderDetail; refresh: () => void }) {
   const { order, items, refunds, approvals } = detail;
-  const openRecord = useOpen();
+  const { submitted } = useEpisode();
+  const opener = useOpen();
   const [action, setAction] = useState<(typeof ACTIONS)[number]["key"]>("refund");
   const remaining = Math.max(order.total_cents - order.refunded_cents, 0);
   const afterWrite = (call: ToolCall) => {
@@ -102,7 +120,7 @@ function OrderCard({ detail, refresh }: { detail: OrderDetail; refresh: () => vo
           title={order.id}
           meta={<StatusBadge value={order.status} />}
           actions={
-            <Button size="sm" variant="ghost" onClick={refresh} aria-label={`Reload order ${order.id} (get_order)`}>
+            <Button size="sm" variant="ghost" onClick={refresh} disabled={submitted} aria-label={`Reload order ${order.id} (get_order)`}>
               Reload
             </Button>
           }
@@ -117,7 +135,8 @@ function OrderCard({ detail, refresh }: { detail: OrderDetail; refresh: () => vo
                   size="sm"
                   variant="ghost"
                   className="-ml-2 font-mono"
-                  onClick={() => openRecord("customers", SLOTS.customer, "get_customer", { customer_id: order.customer_id })}
+                  onClick={() => opener.open("customers", SLOTS.customer, "get_customer", { customer_id: order.customer_id })}
+                  disabled={opener.disabled}
                   aria-label={`Open customer ${order.customer_id} (get_customer)`}
                 >
                   {order.customer_id}
@@ -136,6 +155,11 @@ function OrderCard({ detail, refresh }: { detail: OrderDetail; refresh: () => vo
               ["Refundable", money(remaining)],
             ]}
           />
+          {opener.failure ? (
+            <div className="md:col-span-2">
+              <ApiFailure title="Could not open the customer" message={opener.failure} />
+            </div>
+          ) : null}
         </div>
         <Table
           caption="Items"
@@ -219,13 +243,18 @@ function OrderCard({ detail, refresh }: { detail: OrderDetail; refresh: () => vo
 export function DecideButtons({ approval, onDone }: { approval: Approval; onDone?: (call: ToolCall) => void }) {
   const { run, submitted } = useEpisode();
   const [last, setLast] = useState<ToolCall | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   async function decide(decision: "approved" | "rejected") {
     setBusy(true);
+    setFailure(null);
     try {
       const call = await run("approve", { approval_id: approval.id, decision });
       setLast(call);
       onDone?.(call);
+    } catch (exc) {
+      setLast(null);
+      setFailure(messageOf(exc));
     } finally {
       setBusy(false);
     }
@@ -240,7 +269,12 @@ export function DecideButtons({ approval, onDone }: { approval: Approval; onDone
           Reject
         </Button>
       </div>
-      {last && !last.ok ? <p className="max-w-xs text-[12px] text-bad">{last.error}</p> : null}
+      {last && !last.ok ? (
+        <p role="alert" className="max-w-xs text-[12px] text-bad">
+          <span className="font-medium">Refused #{last.idx}.</span> {last.error}
+        </p>
+      ) : null}
+      {failure ? <ApiFailure compact message={failure} /> : null}
     </div>
   );
 }

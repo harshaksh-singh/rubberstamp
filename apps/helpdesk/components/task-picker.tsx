@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, messageOf } from "@/lib/api";
 import { useEvalMode } from "@/lib/mode";
 import type { TaskInfo } from "@/lib/types";
 
@@ -34,7 +34,7 @@ export function TaskPicker() {
     let live = true;
     api.tasks().then(
       (tasks) => live && setLoad({ state: "ready", tasks }),
-      (exc: unknown) => live && setLoad({ state: "error", message: exc instanceof Error ? exc.message : String(exc) }),
+      (exc: unknown) => live && setLoad({ state: "error", message: messageOf(exc) }),
     );
     return () => {
       live = false;
@@ -61,7 +61,7 @@ export function TaskPicker() {
       const episode = await api.start(task.id, seedValue);
       router.push(`/episodes/${episode.episode_id}`);
     } catch (exc) {
-      setFailure(exc instanceof Error ? exc.message : String(exc));
+      setFailure(messageOf(exc));
       setStarting(null);
     }
   }
@@ -74,7 +74,7 @@ export function TaskPicker() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
           <h1 className="text-xl font-semibold tracking-tight text-fg">Helpdesk console</h1>
@@ -174,7 +174,7 @@ export function TaskPicker() {
           </div>
         ) : load.state === "error" ? (
           <div className="px-4 py-4">
-            <Notice tone="bad" title="rs-api is not answering">
+            <Notice tone="bad" title="Could not load the tasks from rs-api">
               <p>{load.message}</p>
               <p className="mt-1">
                 From the repository root: <Mono>bash scripts/dev_helpdesk.sh</Mono> starts the API and this console
@@ -236,6 +236,6 @@ export function TaskPicker() {
           episodes (<Mono>--max-episodes</Mono>), the least recently used is dropped.
         </p>
       </form>
-    </div>
+    </main>
   );
 }

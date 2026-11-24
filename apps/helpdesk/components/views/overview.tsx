@@ -8,7 +8,7 @@ import { EffectBadge } from "../call-view";
 import { Badge, KeyValues, Mono, PageHeader, Panel, PanelHeader } from "../ui";
 
 export function OverviewView() {
-  const { info, id, calls, submitted } = useEpisode();
+  const { info, id, calls } = useEpisode();
   if (!info) return null;
   const reads = info.tools.filter((tool) => tool.effect === "read");
   const writes = info.tools.filter((tool) => tool.effect === "write");
@@ -41,7 +41,7 @@ export function OverviewView() {
                   ["Split", info.task.split],
                   ["World seed", `${info.seed}${info.seed === info.task.seed ? " (the task's own)" : ""}`],
                   ["Signed in as", `${info.persona.id} (${info.persona.role})`],
-                  ["Status", submitted ? "submitted" : "open"],
+                  ["Status", info.status === "cut_off" ? "cut off at the call cap" : info.status],
                   ["Tool calls", String(calls.length)],
                   ["Episode", <Mono key="e" className="break-all">{info.episode_id}</Mono>],
                   ["Seeded world", <Mono key="w" className="break-all text-fg-muted">{info.world_digest}</Mono>],

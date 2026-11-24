@@ -6,21 +6,25 @@ import { approvalsSeen, ordersSeen, refundsSeen } from "@/lib/ledger";
 import { SLOTS, useOpen } from "@/lib/open";
 
 import { ToolForm } from "../tool-form";
-import { Badge, Button, EmptyState, Mono, PageHeader, Panel, PanelHeader, StatusBadge } from "../ui";
+import { ApiFailure, Badge, Button, EmptyState, Mono, PageHeader, Panel, PanelHeader, StatusBadge } from "../ui";
 import { DecideButtons, Table } from "./orders";
 
 function OrderLink({ orderId }: { orderId: string }) {
-  const openRecord = useOpen();
+  const opener = useOpen();
   return (
-    <Button
-      size="sm"
-      variant="ghost"
-      className="-ml-2 font-mono"
-      onClick={() => openRecord("orders", SLOTS.order, "get_order", { order_id: orderId })}
-      aria-label={`Open order ${orderId} (get_order)`}
-    >
-      {orderId}
-    </Button>
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="-ml-2 font-mono"
+        onClick={() => opener.open("orders", SLOTS.order, "get_order", { order_id: orderId })}
+        disabled={opener.disabled}
+        aria-label={`Open order ${orderId} (get_order)`}
+      >
+        {orderId}
+      </Button>
+      {opener.failure ? <ApiFailure compact title="Could not open the order" message={opener.failure} /> : null}
+    </>
   );
 }
 
