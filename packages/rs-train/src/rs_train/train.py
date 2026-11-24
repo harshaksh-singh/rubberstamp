@@ -9,13 +9,16 @@
     # Mac: everything except generation, with a scripted policy
     uv run rs-train --config packages/rs-train/configs/main.yaml --out var/dry-main --dry-run
 
-    # before writing prereg.json: the cells each variant gives the prediction test (exit 1 below the target)
+    # before writing prereg.json: the cells, and the cells with something measured open, each variant gives the
+    # prediction test (exit 1 below either target)
     uv run rs-train --config packages/rs-train/configs/main.yaml --out results/main/<date> --check-design
 
     # after the runs: rescore every stored rollout, label, summarise (same code path as the dry run)
     uv run rs-train --config packages/rs-train/configs/main.yaml --out results/main/<date> --analyze
 
 Rollouts go to OUT/base/ and OUT/<arm>/seed<k>/rollouts.jsonl (runs.py) through a zero-weight recorder reward.
+What each variant opens on each template is measured once per OUT and kept in OUT/opens.json, keyed by a digest
+of the world, the variants and the rs_* package files (opens.cached_opens); `--verify-design` measures again.
 """
 
 from __future__ import annotations
@@ -27,11 +30,20 @@ import math
 import re
 import sys
 import warnings
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .analysis import ShortDesign, achievable_n
+from .analysis import (
+    ShortDesign,
+    achievable_n,
+    closed_cells,
+    open_cells,
+    own_open_cells,
+    passing_design_seed,
+    write_json,
+)
 from .config import TrainConfig, load_config
 from .design import (
     Manifest,
@@ -39,12 +51,11 @@ from .design import (
     latin_design,
     load_manifest,
     make_variant,
-    save_manifest,
     single_variant_design,
 )
 from .env import EnvOptions, environment_name, make_env_factory
 from .gates import GateMonitor, base_gate
-from .opens import measured_opens
+from .opens import cached_opens, measured_opens
 from .preflight import Limits, behaviour_problems, measure, problems, summary
 from .rescore import rescore
 from .rewards import CellVerifierReward, detector_rewards, stop_rewards
@@ -57,35 +68,78 @@ from .runs import (
     attempt_id,
     pin_manifest,
     prepare_run_dir,
+    real_runs,
     run_dir,
     run_id,
 )
 from .world import World, load_world
 
 RESERVED_GRPO_KEYS = frozenset({"output_dir", "seed", "run_name", "reward_weights"})
+OPENS_CACHE = "opens.json"  # OUT/opens.json: the measured matrix, keyed by opens.opens_key
 
 
 # ---------------------------------------------------------------- manifests
 
 
-def design_manifest(cfg: TrainConfig, world: World, *, with_opens: bool = True) -> Manifest:
+def design_manifest(
+    cfg: TrainConfig,
+    world: World,
+    *,
+    with_opens: bool = True,
+    cache: str | Path | None = None,
+    remeasure: bool = False,
+    design_seed: int | None = None,
+    opens: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+) -> Manifest:
     """The design the config describes: a pure function of design_seed and the sets of variants and templates,
     with what each variant pays on each template measured against the world's verifiers (opens.py; `with_opens=False`
-    skips that when only the cell counts matter). Only the multiplexed arm needs every variant in every seed;
-    single-variant arms use its split, variants and measured matrix."""
+    skips that when only the cell counts matter; `cache` reads and writes the measurement there, opens.cached_opens;
+    `opens` passes a matrix already measured). Only the multiplexed arm needs every variant in every seed;
+    single-variant arms use its split, variants and measured matrix. `design_seed` overrides the config's."""
     d = cfg.design
-    opens = measured_opens(world, [make_variant(v) for v in d.variants]) if with_opens else None
+    if opens is None and with_opens:
+        variants = [make_variant(v) for v in d.variants]
+        opens = (
+            cached_opens(world, variants, cache, remeasure=remeasure)
+            if cache is not None
+            else measured_opens(world, variants)
+        )
     return latin_design(
         world.templates,
         d.variants,
         seeds=d.seeds,
-        design_seed=d.design_seed,
+        design_seed=d.design_seed if design_seed is None else design_seed,
         heldout_fraction=d.heldout_fraction,
         strict_share=d.strict_share,
         prereg_digest=d.prereg_digest,
         complete=cfg.train_variant == "cell",
         opens=opens,
     )
+
+
+def design_check(cfg: TrainConfig, world: World, design: Manifest) -> dict[str, Any]:
+    """What `--check-design` prints: cells and cells with something measured open per variant, of those the cells
+    where the knob's own shortcut pays (informational), the targets, the non-strict cells with nothing open, and the
+    smallest design seed that meets both targets (the documented rule for choosing design_seed; the same config and
+    measured opens)."""
+    d = cfg.design
+
+    def rebuild(seed: int) -> Manifest:
+        return design_manifest(cfg, world, design_seed=seed, opens=design.opens)
+
+    return {
+        "design_seed": design.design_seed,
+        "cells_per_variant": achievable_n(design),
+        "open_cells_per_variant": open_cells(design),
+        "own_open_cells_per_variant": own_open_cells(design),
+        "min_cells_per_variant": d.min_cells_per_variant,
+        "min_open_cells_per_variant": d.min_open_cells_per_variant,
+        "cells_with_nothing_open": closed_cells(design),
+        "heldout_templates": list(design.heldout_templates),
+        "smallest_passing_design_seed": passing_design_seed(
+            design, rebuild, d.min_cells_per_variant, d.min_open_cells_per_variant
+        ),
+    }
 
 
 def arm_manifest(cfg: TrainConfig, design: Manifest) -> Manifest:
@@ -170,7 +224,9 @@ class BaseTopUp:
 
     templates: tuple[str, ...]
     samples: int
-    generation_seed: int  # differs from the first sweep's, so the top-up draws new samples
+    # The top-up's GRPOConfig.seed and sampling seed (`reseed_sampling`), different from the first sweep's, so the
+    # top-up draws new samples rather than replaying the first sweep's random stream.
+    generation_seed: int
 
 
 def top_up_seed(attempt: str) -> int:
@@ -329,7 +385,7 @@ def build_trainer(
     else:
         trainer_class, rows = GRPOTrainer, train_rows(cfg, world, manifest, seed, args)
     train = Dataset.from_list(rows)
-    return trainer_class(
+    trainer = trainer_class(
         model=model if model is not None else cfg.model,
         processing_class=processing_class,
         reward_funcs=funcs,
@@ -340,6 +396,26 @@ def build_trainer(
         environment_factory=env_factory(cfg, world, manifest),
         callbacks=[GateCallback(GateMonitor(cfg.gates))],
     )
+    reseed_sampling(args.seed)
+    return trainer
+
+
+def reseed_sampling(seed: int) -> None:
+    """Seed Python, NumPy and torch (every CUDA device included) with the run's seed, after the trainer is built.
+
+    TRL 1.18.2 builds the colocated engine as `LLM(..., seed=process_index // tensor_parallel_size,
+    distributed_executor_backend="external_launcher")` (trl/generation/vllm_generation.py), so the engine is
+    seeded with 0 on one GPU, whatever GRPOConfig.seed is, and vLLM re-seeds the global generators with it when
+    it starts. Its per-request `SamplingParams.seed` is no way out: colocate sends each of the G copies of a
+    prompt as its own request with n=1, so one seed would make the G completions identical. The external
+    launcher runs vLLM's sampler in this process, where a request without a seed draws from torch's default
+    generator; seeding it again here, after the engine exists, makes the sampling stream follow GRPOConfig.seed
+    (`--seed`, or a top-up's generation seed), which the run saves in training_args.bin. LoRA initialisation and
+    TRL's RepeatSampler order are seeded by TRL from the same value before this point. Not verifiable on a Mac
+    (no vLLM): on the GPU box, two base sweeps with different seeds must give different completions for a prompt."""
+    from transformers import set_seed
+
+    set_seed(seed)
 
 
 def training_problem(trainer: Any, store: RolloutStore) -> str | None:
@@ -397,16 +473,21 @@ def context_report(cfg: TrainConfig, world: World, manifest: Manifest, args: Any
 
 
 def gate_report(cfg: TrainConfig, world: World, manifest: Manifest, out: Path) -> dict[str, Any]:
-    """The base-sweep go/no-go (gates.base_gate) on OUT/base, rescored by the strict verifier."""
+    """The base-sweep go/no-go (gates.base_gate) on OUT/base for this config's arm (`manifest` is the arm's): the
+    sweep is rescored by strict, for the template pass range, and by every grader the arm's cells train on, for
+    each seed's predicted zero-variance share."""
     strict = manifest.strict_id()
     if strict is None:
         raise ValueError("the base-sweep gate needs a strict variant in the design")
     records = [r for path in sorted((out / "base").rglob("rollouts.jsonl")) for r in RolloutStore(path)]
     records = [r for r in require_unique(records) if r.phase == "base"]  # the first sweep and any top-ups
-    rows = rescore(records, world, [manifest.variant(strict)], detectors=(), signals=())
+    graders = {strict} | {cell.variant for _, cell in manifest.cells()}
+    variants = [v for v in manifest.variants if v.id in graders]
+    rows = rescore(records, world, variants, detectors=(), signals=())
     g = grpo_args(cfg, out / "trl", manifest.seeds[0], [1.0]).num_generations
-    report = base_gate(rows, strict=strict, templates=manifest.train_templates, g=g, settings=cfg.gates)
-    return {"base_rollouts": len(records), **report}
+    cells = [(seed, cell.template, cell.variant) for seed, cell in manifest.cells()]
+    report = base_gate(rows, strict=strict, templates=manifest.train_templates, g=g, settings=cfg.gates, cells=cells)
+    return {"base_rollouts": len(records), "arm": arm_of(cfg.train_variant, manifest), **report}
 
 
 # ---------------------------------------------------------------- CLI
@@ -435,7 +516,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check-design",
         action="store_true",
-        help="cells per variant for the prediction test; exit 1 below design.min_cells_per_variant",
+        help="cells and open cells per variant for the prediction test; exit 1 below design.min_cells_per_variant "
+        "or design.min_open_cells_per_variant",
+    )
+    parser.add_argument(
+        "--verify-design",
+        action="store_true",
+        help=f"measure the opens again instead of reading OUT/{OPENS_CACHE}, and compare with the pinned design",
     )
     again = parser.add_mutually_exclusive_group()
     again.add_argument("--resume", action="store_true", help="continue this run from its last checkpoint")
@@ -456,23 +543,28 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     pinned = out / "manifest.json"
+    if args.dry_run and (found := real_runs(out)):
+        raise RunDirInUse(
+            f"--dry-run: {out} holds results of real runs ({', '.join(found[:3])}). A dry run rewrites manifest.json, "
+            f"labels.json, metrics.json and run_card.json there and adds scripted rollouts the analysis would count: "
+            f"give it its own --out (e.g. var/dry-{cfg.name})."
+        )
     if args.manifest or (args.analyze and pinned.exists()):  # the analysis reads the design the runs used
         design = load_manifest(args.manifest or pinned)
         given = True
-    else:  # --check-design only counts cells, so it skips measuring what each variant pays
-        design, given = design_manifest(cfg, world, with_opens=not args.check_design), False
-    target = cfg.design.min_cells_per_variant
+    else:  # measured once per OUT (OUT/opens.json), then read back while the world and the code are unchanged
+        design = design_manifest(cfg, world, cache=out / OPENS_CACHE, remeasure=args.verify_design)
+        given = False
+    target, open_target = cfg.design.min_cells_per_variant, cfg.design.min_open_cells_per_variant
     if args.check_design:
-        print(json.dumps({"cells_per_variant": achievable_n(design), "min_cells_per_variant": target}, indent=2))
-        achievable_n(design, target)
+        print(json.dumps(design_check(cfg, world, design), indent=2))
+        achievable_n(design, target, open_target)
         return 0
     trains_cells = args.dry_run or (args.phase == "train" and not (args.analyze or args.gate))
     if args.predictions or (cfg.train_variant == "cell" and trains_cells):
         # predictions are used here, or this run produces the cell outcomes they will score
-        achievable_n(design, target)
-    if args.dry_run:  # a rehearsal rewrites everything it wrote before
-        save_manifest(design, pinned)
-    else:
+        achievable_n(design, target, open_target)
+    if not args.dry_run:  # a rehearsal pins its own design in its own OUT (dryrun.dry_run)
         design = pin_manifest(out, design, given=given)
     manifest = arm_manifest(cfg, design)
     arm = arm_of(cfg.train_variant, design)
@@ -490,8 +582,8 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return 0
     if args.gate:
         report = gate_report(cfg, world, manifest, out)
-        (out / "base_gate.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-        print(json.dumps(report, indent=2))
+        write_json(out / "base_gate.json", report)  # strict JSON: an undefined rate (a cell with no samples) is null
+        print((out / "base_gate.json").read_text(), end="")
         return 0 if report["ok"] else 1
     if args.seed is None or args.seed not in manifest.seeds:
         parser.error(f"--seed must be one of the manifest's seeds {list(manifest.seeds)}")

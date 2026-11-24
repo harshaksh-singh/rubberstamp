@@ -4,6 +4,7 @@ import dataclasses
 import json
 
 import pytest
+from rs_train import opens as opens_module
 from rs_train.design import (
     FLAG_OPENS,
     FLAG_ORDER,
@@ -19,7 +20,7 @@ from rs_train.design import (
 )
 from rs_train.detectors import DETECTOR_NAMES
 from rs_train.env import episode_for
-from rs_train.opens import measured_opens, shortcut_library
+from rs_train.opens import cached_opens, measured_opens, opens_key, shortcut_library
 from rs_train.toy import ToyStubRegistry, toy_world
 from rs_verify.toy_specs import SHORTCUTS, shortcut_episode, toy_episode, toy_verifier
 from rstrain_helpers import rollout
@@ -249,3 +250,51 @@ def test_trust_claim_pays_any_shortcut_whose_answer_claims_success():
     verifier = toy_world().verifier("refund_email", make_variant("trust_claim"))
     assert verifier.verify(episode_for(*rollout("refund_email", "side_effect_missing"))).passed
     assert not verifier.verify(episode_for(*rollout("refund_email", "noop"))).passed
+
+
+def test_measured_opens_are_cached_by_a_key_of_the_world_and_the_variants(tmp_path, monkeypatch):
+    """Finding 14: every GPU invocation measured the helpdesk world's opens again (about 7 minutes of CPU) only to
+    compare them with the pinned design. They are kept in a file keyed by what the measurement depends on: the same
+    world and variants read the file, anything else measures again, and so does remeasure=True."""
+    world, path = toy_world(), tmp_path / "opens.json"
+    variants = [make_variant("strict"), *(make_variant(flag) for flag in FLAG_ORDER)]
+    first = cached_opens(world, variants, path)
+    assert first == measured_opens(world, variants) and json.loads(path.read_text())["key"] == opens_key(
+        world, variants
+    )
+    calls = []
+
+    def measure(world, variants, templates=None):
+        calls.append([v.id for v in variants])
+        return {t: {v.id: () for v in variants} for t in world.templates}
+
+    monkeypatch.setattr(opens_module, "measured_opens", measure)
+    assert cached_opens(world, variants, path) == first and calls == []  # read back
+    assert cached_opens(world, variants[:3], path) != first and len(calls) == 1  # other variants: another key
+    assert cached_opens(world, variants[:3], path) and len(calls) == 1
+    moved = dataclasses.replace(world, templates={**world.templates, "extra": ("refund_email",)})
+    assert opens_key(moved, variants) != opens_key(world, variants)  # another world: another key
+    cached_opens(world, variants[:3], path, remeasure=True)
+    assert len(calls) == 2
+
+
+def test_a_later_invocation_reads_the_opens_and_still_checks_the_pinned_design(tmp_path, monkeypatch, capsys):
+    """The pinned design is still compared in full, measured opens included: the second invocation in OUT measures
+    nothing, a cache that disagrees with the pinned design is refused, and --verify-design measures again."""
+    from rs_train.train import main
+    from rstrain_helpers import WIDE, config_file
+
+    config, out = config_file(tmp_path, "smoke", world=WIDE), tmp_path / "out"
+    gate = ["--config", str(config), "--out", str(out), "--gate"]  # no base sweep yet: a no-go, after pinning
+    assert main(gate) == 1 and (out / "manifest.json").exists() and (out / "opens.json").exists()
+    calls = []
+    real = opens_module.measured_opens
+    monkeypatch.setattr(opens_module, "measured_opens", lambda *a, **k: calls.append(1) or real(*a, **k))
+    capsys.readouterr()
+    assert main(gate) == 1 and calls == [] and "pins design" not in capsys.readouterr().err
+    cache = json.loads((out / "opens.json").read_text())
+    template = next(iter(cache["opens"]))
+    cache["opens"][template]["status_only"] = ["wrong_target"]  # a cache that no longer matches the pinned design
+    (out / "opens.json").write_text(json.dumps(cache))
+    assert main(gate) == 1 and calls == [] and "pins design" in capsys.readouterr().err
+    assert main([*gate, "--verify-design"]) == 1 and calls == [1] and "pins design" not in capsys.readouterr().err

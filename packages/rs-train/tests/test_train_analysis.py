@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from rs_core.testing.toyworld import SCHEMA
 from rs_train.analysis import (
+    ShortDesign,
     _base_pass,
     _baselines,
     _brier,
@@ -20,11 +21,15 @@ from rs_train.analysis import (
     _verifier_covariates,
     achievable_n,
     analyze,
+    closed_cells,
     collect,
     incentive_gap,
+    open_cells,
+    own_open_cells,
 )
 from rs_train.config import load_config
 from rs_train.design import Cell, Manifest, RunPlan, cell_id, latin_design, make_variant
+from rs_train.detectors import DETECTOR_NAMES
 from rs_train.env import episode_for
 from rs_train.labels import label_cells
 from rs_train.metrics import Prediction, cluster_score_test, pass_at_k, t_interval
@@ -284,15 +289,16 @@ def test_the_covariate_baselines_never_see_the_template_they_predict():
 
 
 def audit_world(seed, *, audit_effect=0.0, delta_effect=2.0):
-    """A synthetic prediction test: 16 templates x 3 seeds, 8 variants on a cycle (v0 opens nothing, v1-v7
-    each open one of 6 behaviours), so 48 audit units. The outcome depends on template effects, p0, Δ,
-    `declared`, a hidden effect per audit unit, and `audit_effect` x an audit that is constant per unit."""
+    """A synthetic prediction test: 16 templates x 3 seeds, 12 variants on a cycle (v0 opens nothing, v1-v11
+    each open one of 6 behaviours), so 72 audit units and 12 variant clusters. The outcome depends on template
+    effects, p0, Δ, `declared`, a hidden effect per audit unit, and `audit_effect` x an audit that is constant per
+    unit."""
     rng = np.random.default_rng(seed)
-    template, unit, audit = rng.normal(0, 0.5, 16), rng.normal(0, 1.0, (8, 6)), rng.normal(0, 1, (8, 6))
+    template, unit, audit = rng.normal(0, 0.5, 16), rng.normal(0, 1.0, (12, 6)), rng.normal(0, 1, (12, 6))
     truth, cov = {}, {}
     for s in range(3):
         for j in range(16):
-            v = (j + s) % 8
+            v = (j + s) % 12
             for b in range(6):
                 key = (f"t{j:02d}::v{v}", f"b{b}")
                 declared = float(v > 0 and b == v % 6)
@@ -308,7 +314,7 @@ def audit_world(seed, *, audit_effect=0.0, delta_effect=2.0):
                     + audit_effect * audit[v, b]
                 )
                 truth[key] = bool(rng.random() < 1 / (1 + math.exp(-eta)))
-                cov[key] = {"template": f"t{j:02d}", "variant": f"v{v}", "behaviour": f"b{b}", "p0": p0}
+                cov[key] = {"template": f"t{j:02d}", "seed": str(s), "variant": f"v{v}", "behaviour": f"b{b}", "p0": p0}
                 cov[key] |= {"delta": delta, "declared": declared, "delta_from": "template", "audit": audit[v, b]}
     return truth, cov
 
@@ -324,28 +330,32 @@ def expit(x):
 def test_the_audit_test_rejects_a_real_audit_effect_with_its_sign():
     truth, cov = audit_world(1, audit_effect=1.5)
     right = _lr_test(predictions(cov, lambda c: expit(c["audit"])), truth, cov)
-    assert right["one_sided"] and right["p"] < 0.01 and right["coef"]["logit_p"] > 0
-    assert (right["clusters"], right["n"], right["templates"]) == (48, 288, 16)
+    assert right["one_sided"] and right["p"] < 0.05 and right["coef"]["logit_p"] > 0
+    assert (right["clusters"], right["n"], right["templates"]) == (12, 288, 16)  # clustered by variant
     assert right["nuisance"] == ["p0", "delta", "declared"]
+    assert right["fixed_effects"] == ["template", "seed", "behaviour"]
+    assert right["cluster_unit"] == "variant" and right["reliable"]  # 12 variants: at least 10 clusters
     backwards = _lr_test(predictions(cov, lambda c: expit(-c["audit"])), truth, cov)
-    assert backwards["coef"]["logit_p"] < 0 and backwards["p"] > 0.99  # the stats review: same p before
+    assert backwards["coef"]["logit_p"] < 0 and backwards["p"] > 0.95  # the stats review: same p before
+    assert backwards["p"] == pytest.approx(1 - right["p"])  # one-sided: the statistic changes sign
 
 
 def test_the_audit_test_is_the_score_test_of_the_audit_column_beyond_the_nuisance_terms():
-    """The statistic equals a hand-built cluster score test on [1, template dummies, p0, Δ, declared] with
-    the audit as the tested column: it tests the audit, and keeps p0, Δ and declared in the null model."""
+    """The statistic equals a hand-built cluster score test on [1, template, seed and behaviour dummies, p0, Δ,
+    declared] with the audit as the tested column and variants as clusters: it tests the audit, and keeps the
+    fixed effects, p0, Δ and declared in the null model."""
     truth, cov = audit_world(2, audit_effect=0.8)
     keys = list(cov)
-    templates = sorted({cov[k]["template"] for k in keys})
+    dummies = [
+        [float(cov[k][f] == level) for k in keys]
+        for f in ("template", "seed", "behaviour")
+        for level in sorted({cov[k][f] for k in keys})[1:]
+    ]
     nuisance = np.column_stack(
-        [np.ones(len(keys))]
-        + [[float(cov[k]["template"] == t) for k in keys] for t in templates[1:]]
-        + [[cov[k][c] for k in keys] for c in ("p0", "delta", "declared")]
+        [np.ones(len(keys))] + dummies + [[cov[k][c] for k in keys] for c in ("p0", "delta", "declared")]
     )
     logit = [math.log(expit(cov[k]["audit"]) / (1 - expit(cov[k]["audit"]))) for k in keys]
-    expected = cluster_score_test(
-        nuisance, logit, [float(truth[k]) for k in keys], [(cov[k]["variant"], cov[k]["behaviour"]) for k in keys]
-    )
+    expected = cluster_score_test(nuisance, logit, [float(truth[k]) for k in keys], [cov[k]["variant"] for k in keys])
     found = _lr_test(predictions(cov, lambda c: expit(c["audit"])), truth, cov)
     assert (found["statistic"], found["df"], found["p"], found["clusters"]) == pytest.approx(expected)
 
@@ -361,16 +371,27 @@ def test_the_audit_test_gives_no_credit_for_p0_delta_or_the_declared_matrix():
     assert "note" in declared_only
 
 
-def test_the_audit_test_uses_graded_audit_features_when_given():
+def test_graded_audit_features_are_a_secondary_analysis_and_the_test_uses_p():
+    """QC of finding 9: with about 11 variant clusters no joint test of several features holds its size, so the
+    test is always the preregistered p, and graded features are reported one by one, two-sided, as descriptive."""
     truth, cov = audit_world(1, audit_effect=1.5)
     graded = [
-        Prediction(cell_id=c, behaviour=b, p=0.5, features={"survival": cov[(c, b)]["audit"], "edit": 1.0})
-        for c, b in cov
+        Prediction(cell_id=c, behaviour=b, p=expit(a), features={"survival": a, "edit": 1.0})
+        for (c, b), a in ((key, cov[key]["audit"]) for key in cov)
     ]
     found = _lr_test(graded, truth, cov)
-    assert (
-        found["features"] == ["survival"] and found["df"] == 1 and found["coef"]["survival"] > 0
-    )  # 'edit' adds no rank
+    plain = _lr_test(predictions(cov, lambda c: expit(c["audit"])), truth, cov)
+    assert found["features"] == ["logit_p"] and found["df"] == 1 and found["one_sided"]
+    assert found["p"] == pytest.approx(plain["p"]) and found["coef"] == pytest.approx(plain["coef"])
+    secondary = found["graded_features"]
+    assert list(secondary["features"]) == ["survival"] and secondary["dropped"] == ["edit"]  # 'edit' adds no rank
+    survival = secondary["features"]["survival"]
+    assert survival["coef"] > 0 and survival["z"] > 0 and survival["p_two_sided"] < 0.05
+    # the feature's own test is the primary's machinery, two-sided
+    assert survival["p_two_sided"] == pytest.approx(2 * found["p"])
+    assert "graded_features" not in plain
+    flat = [Prediction(cell_id=c, behaviour=b, p=0.5, features={"edit": 1.0}) for c, b in cov]
+    assert "note" in _lr_test(flat, truth, cov)  # p = 0.5 everywhere adds nothing either
 
 
 def test_achievable_n_counts_cells_per_variant_and_refuses_a_short_design():
@@ -415,7 +436,9 @@ def test_a_top_up_base_sweep_has_its_own_ids_and_is_pooled(tmp_path):
 def test_the_design_check_refuses_a_short_design_before_a_scored_run(tmp_path, capsys):
     """Finding 21's target, wired into the trainer: --check-design reports the cells per variant, and a dry
     run (or training of the multiplexed arm, or any use of --predictions) refuses a design below it."""
-    three = {"seeds": [0, 1, 2]}  # main's variants over three seeds: short of the shipped target on 20 templates
+    # main's variants over three seeds: short of the shipped target on 20 templates (the toy world's graders open
+    # nothing for some of main's variants, so the open-cell target is off here; the next test checks it)
+    three = {"seeds": [0, 1, 2], "design_seed": 0, "min_open_cells_per_variant": 0}
     ok = config_file(tmp_path, "main", world=WIDE, base_samples=64, design={**three, "min_cells_per_variant": 3})
     assert main(["--config", str(ok), "--out", str(tmp_path / "ok"), "--check-design"]) == 0
     assert json.loads(capsys.readouterr().out)["cells_per_variant"]["ignore_collateral"] == 3
@@ -425,6 +448,69 @@ def test_the_design_check_refuses_a_short_design_before_a_scored_run(tmp_path, c
         assert main(["--config", str(short), "--out", str(tmp_path / "short"), mode]) == 1
         assert "fewer than 4 cells per variant (design.min_cells_per_variant)" in capsys.readouterr().err
     assert not (tmp_path / "short" / "rescored.csv").exists()  # refused before anything ran
+
+
+def test_the_design_check_counts_cells_where_something_is_measured_open(tmp_path, capsys):
+    """Finding 11: main's design seed 0 gave loose_target and ignore_side_effects 4 cells each, all on templates
+    where their graders pay no reference shortcut, and --check-design passed. Open cells are now counted and
+    targeted, the cells with nothing open are listed, and the smallest design seed that meets both targets is
+    named. On the toy world existence_only and ignore_side_effects open nothing anywhere: no seed passes."""
+    design = {"design_seed": 0, "min_cells_per_variant": 3, "min_open_cells_per_variant": 1}
+    config = config_file(tmp_path, "main", world=WIDE, base_samples=64, design=design)
+    assert main(["--config", str(config), "--out", str(tmp_path / "out"), "--check-design"]) == 1
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert "fewer than 1 cells with something measured open (design.min_open_cells_per_variant)" in captured.err
+    assert report["open_cells_per_variant"]["existence_only"] == 0 < report["cells_per_variant"]["existence_only"]
+    closed = report["cells_with_nothing_open"]["existence_only"]
+    assert (
+        len(closed) == report["cells_per_variant"]["existence_only"]
+        and "strict" not in report["cells_with_nothing_open"]
+    )
+    assert report["open_cells_per_variant"]["trust_claim"] == report["cells_per_variant"]["trust_claim"]
+    own, opened_counts = report["own_open_cells_per_variant"], report["open_cells_per_variant"]
+    assert set(own) == set(opened_counts) and all(own[v] <= opened_counts[v] for v in own)
+    assert report["smallest_passing_design_seed"] is None and report["min_open_cells_per_variant"] == 1
+    assert (tmp_path / "out" / "opens.json").exists()  # measured once; the next invocation in OUT reads it
+    # a design that is measured is checked; one that is not cannot count anything as open
+    man = manifest([(0, "A", "count_at_least"), (1, "B", "count_at_least")])
+    assert open_cells(man) == {"strict": 0, "count_at_least": 0}
+    with pytest.raises(ShortDesign, match="with something measured open"):
+        achievable_n(man, open_target=1)
+    opened = man.model_copy(
+        update={"runs": tuple(r.model_copy(update={"cells": tuple(c.model_copy(update={"opens": ("duplicate_writes",)})
+                                                                  for c in r.cells)}) for r in man.runs)}
+    )  # fmt: skip
+    assert achievable_n(opened, target=2, open_target=2) == {"strict": 0, "count_at_least": 2}
+    assert closed_cells(man) == {"count_at_least": ["0:A::count_at_least", "1:B::count_at_least"]}
+    # count_at_least is meant to open duplicate_writes: an open cell that pays only another detector is open, but
+    # not where the knob's own shortcut pays (QC: main's ignore_side_effects pays only duplicate_writes on t13)
+    other = man.model_copy(
+        update={"runs": tuple(r.model_copy(update={"cells": tuple(c.model_copy(update={"opens": ("overclaim",)})
+                                                                  for c in r.cells)}) for r in man.runs)}
+    )  # fmt: skip
+    assert own_open_cells(opened) == {"strict": 0, "count_at_least": 2} == open_cells(opened)
+    assert own_open_cells(other) == {"strict": 0, "count_at_least": 0} and open_cells(other)["count_at_least"] == 2
+    assert own_open_cells(man) == {"strict": 0, "count_at_least": 0}
+
+
+def test_the_main_design_gives_every_variant_a_cell_it_can_exploit():
+    """The shipped design seed is the smallest that meets both targets on the helpdesk world's measured opens. The
+    opens take minutes to measure, so this checks the rule on the 25 templates with the families design log Entry 14
+    lists (where each knob's own shortcut is paid): seed 6 places loose_target on t15, existence_only on t20 and
+    ignore_authorization on t08 and t13, where seed 0 placed loose_target only on templates of other families."""
+    d = load_config(CONFIGS / "main.yaml").design
+    assert (d.design_seed, d.min_cells_per_variant, d.min_open_cells_per_variant) == (6, 4, 1)
+    design = main_design()
+    cells = {(cell.variant, cell.template[:3]) for _, cell in design.cells()}
+    assert {("loose_target", "t15"), ("existence_only", "t20"), ("ignore_authorization", "t08")} <= cells
+    assert ("ignore_authorization", "t13") in cells
+    assert [t[:3] for t in design.heldout_templates] == ["t06", "t10", "t14", "t18", "t24"]
+    seed0 = latin_design(
+        [*design.train_templates, *design.heldout_templates], d.variants, seeds=d.seeds, design_seed=0,
+        heldout_fraction=d.heldout_fraction, strict_share=d.strict_share,
+    )  # fmt: skip
+    assert {c.template[:3] for _, c in seed0.cells() if c.variant == "loose_target"} == {"t04", "t12", "t18", "t22"}
 
 
 def test_analyze_labels_against_the_pure_strict_arm_and_reports_every_arm(tmp_path):
@@ -467,3 +553,134 @@ def test_analyze_labels_against_the_pure_strict_arm_and_reports_every_arm(tmp_pa
     ]
     with pytest.raises(ValueError, match="more than once"):
         analyze(cfg, toy_world(), man, tmp_path / "again", [*records, records[0]])
+
+
+def main_design():
+    """main.yaml's design on the helpdesk world's templates (the cells only: what each variant opens is its prior)."""
+    from rs_world.tasks import task_ids
+
+    d = load_config(CONFIGS / "main.yaml").design
+    return latin_design(
+        task_ids(),
+        d.variants,
+        seeds=d.seeds,
+        design_seed=d.design_seed,
+        heldout_fraction=d.heldout_fraction,
+        strict_share=d.strict_share,
+    )
+
+
+def null_prediction_test(rng, design, behaviours, features=0, effect=0.0):
+    """One prediction test under the null on a real design: every (cell, behaviour) gets an outcome from template,
+    seed, variant and behaviour effects, a latent per cell shared by all its behaviours (one trained policy, detectors
+    that fire together), a latent per audit unit (variant, behaviour), p0, Δ and declared; the audit has a variant
+    part, a behaviour part and noise, and is independent of the outcomes. With `features`, each prediction also
+    carries that many graded features, each drawn like the audit, and p is the logistic of their mean; the outcome's
+    logit rises by `effect` per standard deviation of the first feature (0: still the null)."""
+    cells = design.cells()
+    t_of = {t: i for i, t in enumerate(design.train_templates)}
+    v_of = {v.id: i for i, v in enumerate(design.variants)}
+    nt, nv, nb = len(t_of), len(v_of), len(behaviours)
+    template, seed, cell, variant, behaviour = (
+        rng.normal(0, 0.5, nt),
+        rng.normal(0, 0.5, max(design.seeds) + 1),
+        rng.normal(0, 1.5, len(cells)),
+        rng.normal(0, 0.5, nv),
+        rng.normal(0, 1.0, nb),
+    )
+    unit, p0 = rng.normal(0, 1.0, (nv, nb)), rng.uniform(0, 0.1, (nt, nb))
+    audit = rng.normal(0, 1, nv)[:, None] + rng.normal(0, 1, nb)[None, :] + rng.normal(0, 1, (nv, nb))
+    graded = [
+        rng.normal(0, 1, nv)[:, None] + rng.normal(0, 1, nb)[None, :] + rng.normal(0, 1, (nv, nb))
+        for _ in range(features)
+    ]
+    if graded:
+        audit, first = np.mean(graded, axis=0), graded[0]
+        lift = effect * (first - first.mean()) / first.std()
+    else:
+        lift = np.zeros((nv, nb))
+    truth, cov, preds = {}, {}, []
+    for c, (s, x) in enumerate(cells):
+        t, v = t_of[x.template], v_of[x.variant]
+        for b, name in enumerate(behaviours):
+            declared = float(name in design.variant(x.variant).opens)
+            delta = 0.6 * declared + rng.normal(0, 0.15)
+            eta = -3 + 12 * p0[t, b] + 2 * delta + declared + template[t] + seed[s] + cell[c] + variant[v]
+            eta += behaviour[b] + unit[v, b] + lift[v, b]
+            key = (x.cell_id, name)
+            truth[key] = bool(rng.random() < expit(eta))
+            cov[key] = {"template": x.template, "seed": str(s), "variant": x.variant, "behaviour": name}
+            cov[key] |= {"p0": p0[t, b], "delta": delta, "declared": declared, "delta_from": "template"}
+            named = {f"f{j}": float(g[v, b]) for j, g in enumerate(graded)}
+            preds.append(Prediction(cell_id=x.cell_id, behaviour=name, p=expit(audit[v, b]), features=named))
+    return preds, truth, cov
+
+
+def test_the_audit_test_holds_its_size_on_the_main_design_when_a_cells_outcomes_are_correlated():
+    """Finding 9: one cell's behaviours come from one trained policy, so its outcomes share a latent. Under the null,
+    on main.yaml's 80 cells x 10 detectors, the variant-clustered test rejects 3.7% of these draws at alpha 0.05;
+    clustering by (variant, behaviour), the old unit, rejected 14.0% (each cell's behaviours fell in different
+    clusters). 1,000 seeded draws: a Monte Carlo standard error of 0.7 points."""
+    design = main_design()
+    assert len(design.cells()) == 80
+    rng, draws = np.random.default_rng(20261124), 1000
+    new = old = 0
+    for _ in range(draws):
+        preds, truth, cov = null_prediction_test(rng, design, DETECTOR_NAMES)
+        report = _lr_test(preds, truth, cov)
+        assert (report["clusters"], report["n"]) == (len(design.variants), 800)
+        new += report["p"] < 0.05
+        keys = [(p.cell_id, p.behaviour) for p in preds]  # the old test: template effects, (variant, behaviour) units
+        templates = sorted({cov[k]["template"] for k in keys})
+        nuisance = np.column_stack(
+            [np.ones(len(keys))]
+            + [[float(cov[k]["template"] == t) for k in keys] for t in templates[1:]]
+            + [[cov[k][c] for k in keys] for c in ("p0", "delta", "declared")]
+        )
+        logit = [math.log(p.p / (1 - p.p)) for p in preds]
+        units = [(cov[k]["variant"], cov[k]["behaviour"]) for k in keys]
+        old += cluster_score_test(nuisance, logit, [float(truth[k]) for k in keys], units)[2] < 0.05
+    assert 0.03 <= new / draws <= 0.07, new / draws
+    assert old / draws >= 0.09, old / draws
+
+
+def test_several_graded_features_on_the_main_design_size_power_and_why_there_is_no_joint_test():
+    """QC of finding 9: referred to chi-square, a joint score test of k features over about 11 variant clusters is
+    bounded by clusters - 1 (here 10), so it can never reject from k = 5 on (critical value 11.07). The test is
+    therefore the preregistered p, and each feature is reported alone, two-sided. Seeded draws on main.yaml's
+    design with three or five features, p the logistic of their mean: under the null the primary test and each
+    feature's test stay at or below 5%; with a real effect of 2 logits per SD on the first feature, both find it."""
+    design = main_design()
+    rng = np.random.default_rng(20261125)
+    draws, primary, each = 400, 0, np.zeros(3)
+    for _ in range(draws):
+        report = _lr_test(*null_prediction_test(rng, design, DETECTOR_NAMES, features=3))
+        primary += report["p"] < 0.05
+        each += [report["graded_features"]["features"][f"f{j}"]["p_two_sided"] < 0.05 for j in range(3)]
+        assert report["p"] >= report["p_floor"] == pytest.approx(0.00506, abs=1e-5)  # t(10) at sqrt(10)
+    assert 0.02 <= primary / draws <= 0.07, primary / draws
+    assert (each / draws <= 0.05).all(), each / draws
+    rng = np.random.default_rng(20261126)
+    draws, primary, each = 60, 0, np.zeros(5)
+    for _ in range(draws):
+        report = _lr_test(*null_prediction_test(rng, design, DETECTOR_NAMES, features=5, effect=2.0))
+        primary += report["p"] < 0.05
+        each += [report["graded_features"]["features"][f"f{j}"]["p_two_sided"] < 0.05 for j in range(5)]
+    assert primary / draws >= 0.4 and each[0] / draws >= 0.7 and (each[1:] / draws <= 0.1).all(), (primary, each)
+    # the joint statistic the old code referred to chi-square: with as many features as clusters it is exactly G - 1
+    preds, truth, cov = null_prediction_test(np.random.default_rng(1), design, DETECTOR_NAMES, features=11)
+    keys = [(p.cell_id, p.behaviour) for p in preds]
+    dummies = [
+        [float(cov[k][f] == level) for k in keys]
+        for f in ("template", "seed", "behaviour")
+        for level in sorted({cov[k][f] for k in keys})[1:]
+    ]
+    nuisance = np.column_stack(
+        [np.ones(len(keys))] + dummies + [[cov[k][c] for k in keys] for c in ("p0", "delta", "declared")]
+    )
+    y, units = [float(truth[k]) for k in keys], [cov[k]["variant"] for k in keys]
+    for k in (5, 11):
+        audit = np.array([[p.features[f"f{j}"] for j in range(k)] for p in preds])
+        statistic, df, p, g = cluster_score_test(nuisance, audit, y, units)
+        assert g == 11 and df == k and statistic <= g - 1 + 1e-9 and p > 0.05
+    assert statistic == pytest.approx(10.0)

@@ -409,7 +409,10 @@ def cluster_score_test(
     (cluster-robust, independence working model, small-sample factor G / (G - 1)), so rows that share a
     cluster are not counted as independent evidence. The null model is a Firth fit, which stays finite when
     a template's outcomes are all 0. One tested column: z = U / sqrt(V), p one-sided for a positive
-    coefficient, from Student t with G - 1 df. Several: U' V^-1 U against chi-square(df), two-sided."""
+    coefficient, from Student t with G - 1 df; |z| is at most sqrt(G - 1), so p has a floor (about 0.005 at G = 11).
+    Several: U' V^-1 U against chi-square(df), two-sided. That statistic is at most G - 1, so with few clusters it
+    is far below nominal size and cannot reject at all once the critical value exceeds G - 1 (5 terms at G = 11):
+    the prediction test (analysis._lr_test) therefore tests one term."""
     x0, target = np.asarray(nuisance, dtype=float), np.asarray(y, dtype=float)
     x1 = np.asarray(tested, dtype=float).reshape(len(target), -1)
     beta, _ = logistic_fit(x0, target, firth=True)
@@ -482,7 +485,7 @@ class Prediction(Frozen):
     cell_id: str
     behaviour: str
     p: float = Field(ge=0.0, le=1.0)  # preregistered probability that the cell exploits the behaviour
-    features: dict[str, float] = {}  # graded audit features behind p, for the likelihood-ratio test
+    features: dict[str, float] = {}  # graded audit features behind p: a secondary, per-feature analysis
 
 
 def load_predictions(path: str | Path) -> tuple[list[Prediction], str]:

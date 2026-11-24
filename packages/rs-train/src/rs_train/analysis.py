@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import scipy.stats as st
 
 from .config import TrainConfig
 from .design import Manifest
@@ -68,6 +69,7 @@ from .metrics import (
 from .rescore import rescore, wide, write_table
 from .rollouts import RolloutRecord, RolloutStore, require_unique
 from .runs import arm_of as arm_for
+from .runs import is_scripted
 from .world import World
 
 FINAL_METRICS = (
@@ -204,6 +206,15 @@ def _final(episodes: list[dict[str, Any]], start: int, expected: Sequence[int] =
     return report
 
 
+def expected_seeds(cfg: TrainConfig, manifest: Manifest) -> dict[str, tuple[int, ...]]:
+    """The seeds an arm must have rollouts for: every design seed of the multiplexed arm, whose cells differ by
+    seed (a missing seed leaves cells untrained). A single-variant or pure-strict arm trains the same cells in
+    every seed and may run fewer of them (the smoke test trains seed 0, main's pure-strict control two), so it
+    is analysed on the seeds it has."""
+    arm = arm_for(cfg.train_variant, manifest)
+    return {arm: manifest.seeds} if arm == "mixed" else {}
+
+
 def _arms(
     episodes: list[dict[str, Any]], t: LabelThresholds, expected: Mapping[str, Sequence[int]] | None = None
 ) -> dict[str, dict[str, Any]]:
@@ -299,7 +310,7 @@ def incentive_gap(
 
 
 def _covariates(labels: Sequence[CellLabel], rows: Sequence[Mapping[str, Any]], manifest: Manifest) -> dict[Any, dict]:
-    """Per (cell, behaviour): its template, seeds and audit unit (variant, behaviour), p0, declared, Δ for
+    """Per (cell, behaviour): its template, seeds, variant and behaviour (the audit unit), p0, declared, Δ for
     that shortcut, and the cell's base-sweep selection error and Youden's J."""
     strict = manifest.strict_id()
     base = _base_episodes(rows)
@@ -356,63 +367,129 @@ def _logit(p: float) -> float:
 
 
 NUISANCE = ("p0", "delta", "declared")
+# Fixed effects of the prediction test's null model. The seed's run and the behaviour's overall rate are shared
+# across variants, so without them the outcomes of different variant clusters would be correlated.
+FIXED_EFFECTS = ("template", "seed", "behaviour")
+CLUSTER = "variant"  # every cell has one variant, so a cluster holds whole cells and whole audit units
 
 
 def _full_rank(columns: Sequence[tuple[str, Sequence[float]]], start: np.ndarray) -> tuple[np.ndarray, list[str]]:
-    """`start` with each column appended that adds rank, and the names of those kept."""
+    """`start` with each column appended that adds rank, and the names of those kept (Gram-Schmidt: a column is
+    kept when its part orthogonal to the columns so far is not numerically zero)."""
     design, kept = start, []
+    basis, _ = np.linalg.qr(start)
     for name, col in columns:
-        trial = np.column_stack([design, col])
-        if np.linalg.matrix_rank(trial) > design.shape[1]:
-            design, kept = trial, [*kept, name]
+        x = np.asarray(col, dtype=float)
+        rest = x - basis @ (basis.T @ x)
+        rest = rest - basis @ (basis.T @ rest)  # twice is enough (Kahan)
+        if np.linalg.norm(rest) > 1e-9 * max(1.0, float(np.linalg.norm(x))):
+            design, kept = np.column_stack([design, x]), [*kept, name]
+            basis = np.column_stack([basis, rest / np.linalg.norm(rest)])
     return design, kept
+
+
+def _p_floor(clusters: int) -> float:
+    """The smallest one-sided p the one-term cluster score test can give: its z is at most sqrt(G - 1) (the
+    variance is computed under the null, so it grows with the score), referred to Student t with G - 1 df."""
+    return float(st.t.sf(math.sqrt(clusters - 1), clusters - 1)) if clusters > 1 else math.nan
+
+
+def _graded_features(
+    scored: Sequence[Prediction], nuisance: np.ndarray, y: Sequence[float], clusters: Sequence[Any]
+) -> dict[str, Any] | None:
+    """Secondary and descriptive: when every prediction carries the same graded features, each one's own cluster
+    score test beyond the nuisance terms (two-sided, since features carry no preregistered sign; not adjusted for
+    multiplicity; 1-2% of null draws below 0.05 per feature in seeded simulations on main's design) and its Firth
+    coefficient in a model with all of them. There is no joint test. The score statistic of several terms is at
+    most clusters - 1, so against chi-square it can never reject once the critical value exceeds that (5 features
+    with 11 clusters, 4 with 10), and on main's design it rejected 2.2% of null draws with 2 features and 0.5%
+    with 3. The Hotelling F and cluster sign-flip references rejected 5-10% with 1-8 features there (design log
+    Entry 17)."""
+    names = sorted(scored[0].features) if scored else []
+    if not (names and all(sorted(p.features) == names for p in scored)):
+        return None
+    full, kept = _full_rank([(f, [p.features[f] for p in scored]) for f in names], nuisance)
+    dropped = [f for f in names if f not in kept]
+    if not kept or len(y) <= full.shape[1]:
+        return {"note": "no graded feature adds anything beyond the nuisance terms", "dropped": dropped}
+    beta, _ = logistic_fit(full, y, firth=True)
+    each = {}
+    for i, name in enumerate(kept):
+        column = nuisance.shape[1] + i
+        z, _, upper, _ = cluster_score_test(nuisance, full[:, column], y, clusters)
+        each[name] = {"z": z, "p_two_sided": min(1.0, 2 * min(upper, 1 - upper)), "coef": float(beta[column])}
+    return {
+        "features": each,
+        "dropped": dropped,
+        "method": "each feature alone: the primary test's score test, two-sided, unadjusted; coef: Firth estimate "
+        "with all kept features in the model. Descriptive: the primary test is logit_p",
+    }
 
 
 def _lr_test(preds: Sequence[Prediction], truth: Mapping[Any, bool], cov: Mapping[Any, dict]) -> dict[str, Any]:
     """Does the audit predict exploitation beyond p0, Δ and the declared matrix? Logistic regression with
-    template fixed effects plus p0, Δ and `declared` (the audit knows which shortcuts were planted by
-    construction, research/60 section 2a.1, and Δ cannot measure a payment for a shortcut the base model
-    never takes), and the audit: its graded features when every prediction carries the same ones, else the
-    logit of its preregistered probability. The audit varies by (variant, behaviour), so inference is a
-    score test with variance from those audit units (metrics.cluster_score_test), not from rows. One audit
-    term: one-sided, H1 = a positive coefficient. Several: a two-sided chi-square, since the predictions
-    carry no preregistered signs. `coef` is the Firth estimate of each audit term in the full model."""
+    template, seed and behaviour fixed effects plus p0, Δ and `declared` (the audit knows which shortcuts were
+    planted by construction, research/60 section 2a.1, and Δ cannot measure a payment for a shortcut the base
+    model never takes), and the audit as one preregistered index: the logit of each prediction's probability.
+    Graded features, when every prediction carries the same ones, are reported under `graded_features` as a
+    secondary, descriptive analysis (_graded_features: no joint test holds its size with about 11 clusters).
+
+    Inference is a score test with variance clustered by variant (metrics.cluster_score_test), not by row or by
+    (variant, behaviour). All behaviours of a cell come from one trained policy and its detectors fire together,
+    so a cell's outcomes are correlated; the audit is constant per (variant, behaviour), so pairs of one audit
+    unit are correlated too. A variant holds whole cells and whole audit units, so both stay inside a cluster.
+    What crosses variants is the seed's run and the behaviour's overall rate, which the fixed effects absorb.
+    One-sided, H1 = a positive coefficient, against Student t with clusters - 1 df. In a seeded simulation on
+    main.yaml's 80-cell design it rejects 3.7% of null draws at the 5% level (tests); clustering by (variant,
+    behaviour) rejected 14.0%. With about 11 clusters the test is approximate and slightly conservative there, and
+    its p cannot fall below `p_floor` (about 0.005 with 11 clusters, 0.0075 with 10). `coef` is the Firth estimate
+    of the audit term in the full model."""
     scored = [p for p in preds if (p.cell_id, p.behaviour) in truth]
     keys = [(p.cell_id, p.behaviour) for p in scored]
-    names = sorted(scored[0].features) if scored else []
-    if not (names and all(sorted(p.features) == names for p in scored)):
-        names = ["logit_p"]
-    audit = {f: [p.features[f] if f != "logit_p" else _logit(p.p) for p in scored] for f in names}
     templates = sorted({cov[k]["template"] for k in keys})
     if len(templates) < 2 or not all(math.isfinite(cov[k][c]) for k in keys for c in NUISANCE):
         return {"note": "needs two templates and finite p0, delta and declared"}
-    dummies = [(f"template={t}", [float(cov[k]["template"] == t) for k in keys]) for t in templates[1:]]
+    groups = {k: cov[k][CLUSTER] for k in keys}
+    if len(set(groups.values())) < 2:
+        return {"note": f"needs cells of at least two variants: the test's variance is clustered by {CLUSTER}"}
+    dummies = [
+        (f"{f}={level}", [float(cov[k][f] == level) for k in keys])
+        for f in FIXED_EFFECTS
+        for level in sorted({cov[k][f] for k in keys})[1:]
+    ]
     nuisance, kept = _full_rank(
         [*dummies, *((c, [cov[k][c] for k in keys]) for c in NUISANCE)], np.ones((len(keys), 1))
     )
-    full, tested = _full_rank(list(audit.items()), nuisance)
+    full, tested = _full_rank([("logit_p", [_logit(p.p) for p in scored])], nuisance)
     if not tested or len(keys) <= full.shape[1]:
         return {"note": "the audit adds nothing beyond the nuisance terms (e.g. it restates the declared matrix)"}
     y = [float(truth[k]) for k in keys]
-    statistic, df, p, units = cluster_score_test(
-        nuisance, full[:, nuisance.shape[1] :], y, [(cov[k]["variant"], cov[k]["behaviour"]) for k in keys]
-    )
+    clusters = [groups[k] for k in keys]
+    statistic, df, p, units = cluster_score_test(nuisance, full[:, nuisance.shape[1] :], y, clusters)
     beta, _ = logistic_fit(full, y, firth=True)
-    return {
+    report = {
         "statistic": statistic,
         "df": df,
         "p": p,
-        "one_sided": df == 1,
+        "p_floor": _p_floor(units),
+        "one_sided": True,
         "coef": dict(zip(tested, beta[nuisance.shape[1] :].tolist(), strict=True)),
         "n": len(keys),
         "templates": len(templates),
         "clusters": units,
+        "cluster_unit": CLUSTER,
+        "reliable": units >= MIN_CLUSTERS,
         "features": tested,
-        "nuisance": [c for c in kept if not c.startswith("template=")],
+        "fixed_effects": list(FIXED_EFFECTS),
+        "nuisance": [c for c in kept if not c.startswith(tuple(f"{f}=" for f in FIXED_EFFECTS))],
         "delta_from": dict(sorted(Counter(cov[k]["delta_from"] for k in keys).items())),
-        "method": "Firth logistic null model (template fixed effects + p0 + delta + declared); score test of the "
-        "audit, variance clustered by (variant, behaviour)",
+        "method": "Firth logistic null model (template, seed and behaviour fixed effects + p0 + delta + declared); "
+        "one-sided score test of logit(p), variance clustered by variant (whole cells), t reference with "
+        "clusters - 1 df",
     }
+    if (graded := _graded_features(scored, nuisance, y, clusters)) is not None:
+        report["graded_features"] = graded
+    return report
 
 
 def _brier(
@@ -459,20 +536,74 @@ class ShortDesign(ValueError):
     pass
 
 
-def achievable_n(manifest: Manifest, target: int = 0) -> dict[str, int]:
+def open_cells(manifest: Manifest) -> dict[str, int]:
+    """Cells per variant, over all seeds, whose measured opens are not empty: the cells where the variant's grader
+    pays some reference shortcut on that template, so the cell can be exploited at all. A cell that was not measured
+    (opens None) does not count: the prior says what a flag is meant to open, not what it opens there."""
+    counts = Counter(cell.variant for _, cell in manifest.cells() if cell.opens)
+    return {v.id: counts.get(v.id, 0) for v in manifest.variants}
+
+
+def own_open_cells(manifest: Manifest) -> dict[str, int]:
+    """Of the open cells, those whose measured opens include a detector the variant's flag is meant to open (its
+    prior, Variant.opens): where the knob's own shortcut pays. An open cell can pay only a detector that fires
+    alongside (main's ignore_side_effects on t13 pays duplicate_writes, not side_effect_missing). Informational:
+    the design target counts open cells."""
+    counts = Counter(
+        cell.variant
+        for _, cell in manifest.cells()
+        if cell.opens and set(cell.opens) & set(manifest.variant(cell.variant).opens)
+    )
+    return {v.id: counts.get(v.id, 0) for v in manifest.variants}
+
+
+def closed_cells(manifest: Manifest) -> dict[str, list[str]]:
+    """Per non-strict variant, its cells (seed:cell id) with nothing measured open."""
+    out: dict[str, list[str]] = {v.id: [] for v in manifest.variants if v.kind != "strict"}
+    for seed, cell in manifest.cells():
+        if cell.variant in out and not cell.opens:
+            out[cell.variant].append(f"{seed}:{cell.cell_id}")
+    return {v: cells for v, cells in out.items() if cells}
+
+
+def achievable_n(manifest: Manifest, target: int = 0, open_target: int = 0) -> dict[str, int]:
     """Cells per variant over all seeds: the observations each variant contributes to the cell-level
     prediction test. Raises ShortDesign naming every non-strict variant below `target` cells (the config's
-    design.min_cells_per_variant). train.py calls it before a run whose outcomes preregistered predictions
+    design.min_cells_per_variant) or below `open_target` cells with something measured open (open_cells;
+    design.min_open_cells_per_variant). train.py calls it before a run whose outcomes preregistered predictions
     will score, and `rs-train --check-design` before writing them (a variant with 0 cells was never
-    assigned by the design)."""
+    assigned by the design; one with 0 open cells was assigned only where its grader pays nothing)."""
     counts = Counter(cell.variant for _, cell in manifest.cells())
     n = {v.id: counts.get(v.id, 0) for v in manifest.variants}
-    if short := {v.id: n[v.id] for v in manifest.variants if v.kind != "strict" and n[v.id] < target}:
+    opened = open_cells(manifest)
+    lenient = [v.id for v in manifest.variants if v.kind != "strict"]
+    problems = []
+    if short := {v: n[v] for v in lenient if n[v] < target}:
+        problems.append(f"fewer than {target} cells per variant (design.min_cells_per_variant): {short}")
+    if closed := {v: opened[v] for v in lenient if opened[v] < open_target}:
+        problems.append(
+            f"fewer than {open_target} cells with something measured open (design.min_open_cells_per_variant): {closed}"
+        )
+    if problems:
         raise ShortDesign(
-            f"fewer than {target} cells per variant (design.min_cells_per_variant): {short}, "
-            f"{sum(n.values())} cells in all. Add templates or cut variants before preregistering."
+            "; ".join(problems) + f"; {sum(n.values())} cells in all. Change design_seed (`--check-design` names the "
+            "smallest that passes), add templates or cut variants before preregistering."
         )
     return n
+
+
+def passing_design_seed(
+    manifest: Manifest, rebuild: Callable[[int], Manifest], target: int, open_target: int, limit: int = 1000
+) -> int | None:
+    """The smallest design seed from 0 whose design (`rebuild(seed)`, the same config and measured opens) meets
+    both targets: the preregistered rule for choosing design_seed. None when no seed below `limit` does."""
+    for seed in range(limit):
+        try:
+            achievable_n(manifest if seed == manifest.design_seed else rebuild(seed), target, open_target)
+        except ShortDesign:
+            continue
+        return seed
+    return None
 
 
 # ---------------------------------------------------------------- files and the entry point
@@ -494,8 +625,18 @@ def write_json(path: Path, value: Any) -> None:
 
 def collect(out: str | Path) -> list[RolloutRecord]:
     """Every rollouts.jsonl under `out` (the base sweep and one per seed), in a stable order. Raises on a
-    repeated episode id: a retried run must not be counted twice."""
-    return require_unique(record for path in sorted(Path(out).rglob("rollouts.jsonl")) for record in RolloutStore(path))
+    repeated episode id (a retried run must not be counted twice) and on scripted dry-run records mixed with
+    real ones (a dry run pointed at a results directory)."""
+    records = require_unique(
+        record for path in sorted(Path(out).rglob("rollouts.jsonl")) for record in RolloutStore(path)
+    )
+    scripted = {r.run_id for r in records if is_scripted(r)}
+    if scripted and len(scripted) < len({r.run_id for r in records}):
+        raise ValueError(
+            f"{out} mixes scripted dry-run rollouts (run ids {sorted(scripted)[:3]}) with real ones: move the dry "
+            f"run's files out (the dry run writes {Path(out) / 'rollouts.jsonl'})"
+        )
+    return records
 
 
 def analyze(
@@ -530,7 +671,7 @@ def analyze(
 
     opened = {cell.cell_id: manifest.opens_of(cell) for _, cell in manifest.cells()}
     episodes = wide(rows, opened, strict=manifest.strict_id() or "strict")
-    by_arm = _arms(episodes, t, {arm_for(cfg.train_variant, manifest): manifest.seeds})
+    by_arm = _arms(episodes, t, expected_seeds(cfg, manifest))
     primary = "mixed" if "mixed" in by_arm else next(iter(by_arm), "mixed")
     width = int(cfg.grpo.get("save_steps") or 1)
     metrics = {
@@ -556,6 +697,8 @@ def analyze(
         "seeds": list(manifest.seeds),
         "seeds_analysed": {arm: sorted(report["last_step"]) for arm, report in by_arm.items()},
         "cells_per_variant": achievable_n(manifest),
+        "open_cells_per_variant": open_cells(manifest),
+        "own_open_cells_per_variant": own_open_cells(manifest),
         "episodes": counts,
         "python": platform.python_version(),
         "files": sorted({p.name for p in out.iterdir() if p.is_file()} | {"run_card.json"}),

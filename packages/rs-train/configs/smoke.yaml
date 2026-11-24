@@ -15,7 +15,7 @@ lora: {r: 16, alpha: 32, dropout: 0.0, target_modules: all-linear}
 # 1,843 chars keeps every golden response whole (768 cut t05's on seed 2).
 env: {max_response_tokens: 1024, chars_per_token: 1.8}
 log_verifiers: [strict]
-base_samples: 64           # base sweep: rollouts per template (a multiple of G); enough for the pass@8 gate
+base_samples: 64           # base sweep: rollouts per template (a multiple of G), pooled over its instances by the gate
 keep_states: false         # rescoring replays trajectories through the deterministic executor
 
 design:
@@ -83,8 +83,8 @@ gates:                     # stop rules checked every logged step, and the base-
   step_time_window: 3
   logp_diff_max: 0.5       # mean |logp_vLLM - logp_trainer| per token; a broken LoRA sync shows here
   logp_diff_window: 3
-  base_pass_range: [0.1, 0.7]   # research/64 section 3: per-template strict pass@8 in 10-70% (instances pooled)
-  base_zero_variance_max: 0.6
+  base_pass_range: [0.1, 0.7]   # per-template strict per-sample pass rate (pass@1, instances pooled) in 10-70%
+  base_zero_variance_max: 0.6   # per seed, mean(p^8 + (1 - p)^8) over its cells, p under each cell's own grader
 
 dry_run:                   # Mac rehearsal: a scripted policy replaces generation
   steps: [0, 10, 20, 30, 35, 39]   # global steps; TRL records 0 .. max_steps - 1

@@ -131,6 +131,27 @@ def test_a_base_top_up_is_pooled_with_the_first_sweep(tokenizer, tmp_path):
     }
 
 
+def test_the_sampling_generators_follow_the_run_seed_after_the_engine_reseeds_them(tokenizer, tmp_path, monkeypatch):
+    """Finding 16: TRL builds the colocated vLLM engine with seed 0, and vLLM seeds the global generators with it
+    when it starts, so --seed and a top-up's generation seed never reached the sampler. Simulated here by a trainer
+    that reseeds with 0 at the end of its constructor: build_trainer seeds them again with GRPOConfig.seed."""
+    import torch
+    from rs_train import trainer as trl_side
+
+    class EngineReseeds(trl_side.BaseSweepTrainer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            torch.manual_seed(0)  # what LLM(..., seed=0) does to this process's generators
+
+    monkeypatch.setattr(trl_side, "BaseSweepTrainer", EngineReseeds)
+    top_up = BaseTopUp(("close_ticket",), 2, 12345)
+    t = trainer(tokenizer, tmp_path, phase="base", run="smoke-base-B-topup", top_up=top_up)
+    assert isinstance(t, EngineReseeds) and t.args.seed == 12345 and torch.initial_seed() == 12345
+    draw = torch.rand(3)
+    torch.manual_seed(12345)
+    assert torch.equal(draw, torch.rand(3))  # the stream vLLM's sampler draws from starts at the run's seed
+
+
 def test_resume_continues_from_the_checkpoint_under_a_new_attempt(tokenizer, tmp_path):
     """Finding #36: a crashed run restarts from its last checkpoint; the records of the steps it repeats are
     dropped, and the new attempt's episode ids cannot collide with the old ones."""

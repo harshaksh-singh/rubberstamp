@@ -49,10 +49,11 @@ def read(path):
 @pytest.fixture(scope="module")
 def main_config(tmp_path_factory):
     """main.yaml on the wide toy world, with a 64-rollout base sweep to keep the suite quick. Its 11-variant design
-    gives some variants 3 cells, below the shipped target of 4 (test_train_analysis checks the refusal), so the
-    rehearsal lowers the target."""
+    gives some variants 3 cells, below the shipped target of 4, and the toy world's graders open nothing for some of
+    main's variants (test_train_analysis checks both refusals), so the rehearsal lowers both targets."""
     directory = tmp_path_factory.mktemp("config")
-    return config_file(directory, "main", world=WIDE, base_samples=64, design={"min_cells_per_variant": 3})
+    design = {"min_cells_per_variant": 3, "min_open_cells_per_variant": 0}
+    return config_file(directory, "main", world=WIDE, base_samples=64, design=design)
 
 
 @pytest.fixture(scope="module")
@@ -287,6 +288,54 @@ def test_a_gpu_run_refuses_an_earlier_attempt_and_a_changed_design(tmp_path, cap
     changed = config_file(tmp_path / "changed", "smoke", world=WIDE, design={"design_seed": 1})
     assert main(["--config", str(changed), "--out", str(out), "--seed", "0"]) == 1
     assert "pins design" in capsys.readouterr().err and read(out / "manifest.json") == pinned
+
+
+def test_a_dry_run_refuses_a_directory_that_holds_real_runs(tmp_path, capsys):
+    """Finding 18: a dry run pointed at a results directory overwrote its pinned manifest and added scripted
+    rollouts that --analyze counted. It is refused there; a dry run's own directory can be rewritten, and the
+    analysis refuses scripted and real rollouts mixed in one directory."""
+    config = config_file(tmp_path, "smoke", world=WIDE)
+    real = tmp_path / "real"
+    (real / "base").mkdir(parents=True)
+    (real / "base" / "rollouts.jsonl").write_text("")
+    real_pin = '{"pinned": "by a GPU run"}\n'
+    (real / "manifest.json").write_text(real_pin)
+    assert main(["--config", str(config), "--out", str(real), "--dry-run"]) == 1
+    assert "holds results of real runs (base/rollouts.jsonl, manifest.json)" in capsys.readouterr().err
+    assert (real / "manifest.json").read_text() == real_pin and not (real / "rollouts.jsonl").exists()
+    dry = tmp_path / "dry"
+    for _ in range(2):  # a rehearsal rewrites its own directory
+        assert main(["--config", str(config), "--out", str(dry), "--dry-run"]) == 0
+    capsys.readouterr()
+    store = RolloutStore(dry / "rollouts.jsonl").read()
+    RolloutStore(dry / "base" / "rollouts.jsonl").append(
+        [r.model_copy(update={"run_id": "smoke-base-20261124T000000Z"}) for r in store if r.phase == "base"]
+    )  # a real base sweep copied into the dry run's directory
+    with pytest.raises(ValueError, match="mixes scripted dry-run rollouts"):
+        main(["--config", str(config), "--out", str(dry), "--analyze"])
+
+
+def test_the_smoke_runbook_analyses_the_one_seed_it_trains(tmp_path):
+    """Finding 13: the runbook trains the flawed arm on seed 0 only, and --analyze expected every design seed
+    (smoke's are 0, 1, 2), so it raised. A single-variant or pure-strict arm is analysed on the seeds it ran; the
+    multiplexed arm still needs all of them (test_train_analysis)."""
+    config = config_file(tmp_path, "smoke", world=WIDE)
+    flawed = ["--train-variant", "status_only"]
+    dry = tmp_path / "dry"
+    assert main(["--config", str(config), "--out", str(dry), "--dry-run", *flawed]) == 0
+    out = tmp_path / "status_only"
+    records = RolloutStore(dry / "rollouts.jsonl").read()
+    attempt = "20261124T000000Z"  # as the GPU runs record them: their own attempt, their own directories
+    real = [r.model_copy(update={"run_id": r.run_id.removesuffix("-dry") + "-" + attempt}) for r in records]
+    RolloutStore(out / "base" / "rollouts.jsonl").append([r for r in real if r.phase == "base"])
+    RolloutStore(out / "single_variant-status_only" / "seed0" / "rollouts.jsonl").append(
+        [r for r in real if r.phase != "base" and r.seed == 0]
+    )
+    shutil.copy(dry / "manifest.json", out / "manifest.json")
+    assert main(["--config", str(config), "--out", str(out), *flawed, "--analyze"]) == 0
+    card = read(out / "run_card.json")
+    assert card["seeds"] == [0, 1, 2] and card["seeds_analysed"] == {"single_variant": [0]}
+    assert read(out / "metrics.json")["final"]["hack_rate"]["seeds"] == 1
 
 
 def test_smoke_config_matches_the_recipe(tmp_path):
