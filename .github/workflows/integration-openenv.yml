@@ -1,0 +1,147 @@
+# The OpenEnv integration (integrations/openenv/rubberstamp_env): its own uv project and lock, using the workspace
+# packages through editable path sources. Lint, check the generated files, run OpenEnv's static validation and the
+# conformance proof (all 500 instances x golden/shortcut/noop through the server's WebSocket, 64 concurrent clients,
+# RFC 008 checks); a second job adds the TRL extra, type-checks everything (trl_env.py and its tests import trl,
+# transformers, datasets and rs-train, which only that extra installs) and runs the environment_factory smoke tests.
+# The Docker image is built, validated at OpenEnv's runtime level and probed only on workflow_dispatch.
+# Actions are pinned to the same commit SHAs as ci.yml.
+name: Integration (OpenEnv)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/openenv/**"
+      - "packages/rs-core/**"
+      - "packages/rs-verify/**"
+      - "packages/rs-world/**"
+      - "packages/rs-suite/**"
+      - "packages/rs-train/**"
+      - ".github/workflows/integration-openenv.yml"
+  pull_request:
+    paths:
+      - "integrations/openenv/**"
+      - "packages/rs-core/**"
+      - "packages/rs-verify/**"
+      - "packages/rs-world/**"
+      - "packages/rs-suite/**"
+      - "packages/rs-train/**"
+      - ".github/workflows/integration-openenv.yml"
+  workflow_dispatch:
+    inputs:
+      docker:
+        description: "Also build the server image and probe it (needs Docker on the runner)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-openenv-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    working-directory: integrations/openenv/rubberstamp_env
+
+jobs:
+  openenv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: integrations/openenv/rubberstamp_env/uv.lock
+          cache-suffix: openenv
+      - name: Install (openenv==0.14.0 and the rs-* packages, editable; no TRL)
+        run: uv sync --locked
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Generated files are current (openenv.yaml, validation/*.json)
+        run: uv run python scripts/generate.py --check
+      - name: OpenEnv static validation
+        run: uv run openenv validate . --level static --skip-build
+      - name: Tests (conformance on 500 x 3, isolation at 64, reward rule, leakage, Task API, validators)
+        run: uv run pytest -q -n 4 -p no:cacheprovider
+
+  openenv-trl:
+    # The TRL extra pulls torch; the GRPOTrainer probe skips without a cached Qwen3 tokenizer (HF_HUB_OFFLINE).
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: integrations/openenv/rubberstamp_env/uv.lock
+          cache-suffix: openenv-trl
+      - name: Install with the trl extra (trl==1.18.2, rs-train)
+        run: uv sync --locked --extra trl
+      - name: Type-check (every file in [tool.pyright] include, trl_env.py and its tests among them)
+        run: uv run pyright
+      - name: TRL environment_factory smoke tests
+        run: uv run pytest -q -p no:cacheprovider tests/test_trl_env.py
+
+  openenv-docker:
+    if: github.event_name == 'workflow_dispatch' && inputs.docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: integrations/openenv/rubberstamp_env/uv.lock
+          cache-suffix: openenv
+      - name: Install
+        run: uv sync --locked
+      - name: Vendor the rs-* wheels and the hashed requirements
+        run: sh scripts/vendor_wheels.sh
+      - name: OpenEnv runtime validation (builds its own image; WARN is expected, see the README)
+        run: |
+          uv run openenv validate . --level semantic --output "$RUNNER_TEMP/openenv-runtime.json"
+          uv run python -c "
+          import json, os
+          report = json.load(open(os.path.join(os.environ['RUNNER_TEMP'], 'openenv-runtime.json')))
+          lines = ['## openenv validate (runtime)', '', '| check | status |', '|---|---|']
+          lines += [f\"| {r['check_id']} | {r['status']} |\" for r in report['results']]
+          open(os.environ['GITHUB_STEP_SUMMARY'], 'a').write('\\n'.join(lines) + '\\n')
+          bad = [r['check_id'] for r in report['results'] if r['check_id'].startswith('runtime.') and r['status'] != 'pass']
+          raise SystemExit(f'runtime checks not passing: {bad}' if bad else 0)
+          "
+      - name: Build the image (base images pinned by digest)
+        run: docker build -f server/Dockerfile -t rubberstamp-env:ci .
+      - name: Run it and probe it
+        run: |
+          docker run -d --name rubberstamp-env -p 127.0.0.1:18500:8000 rubberstamp-env:ci
+          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:18500/health > /dev/null && break; sleep 1; done
+          uv run openenv validate --url http://127.0.0.1:18500
+          uv run python -c "
+          from rs_suite.conformance import check, instances
+          from rubberstamp_env.driver import OpenEnvDriver
+          found = check(OpenEnvDriver('http://127.0.0.1:18500'), instances()[::20])
+          print(f'{len(found)} mismatches on 25 instances x 3 plans in the container')
+          raise SystemExit(1 if found else 0)
+          "
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs rubberstamp-env 2>&1 | tail -50 || true
+          docker rm -f rubberstamp-env || true

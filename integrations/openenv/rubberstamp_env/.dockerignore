@@ -1,0 +1,9 @@
+# The Docker build context is this package: send only what server/Dockerfile copies.
+*
+!__init__.py
+!models.py
+!client.py
+!openenv.yaml
+!server/
+!vendor/
+**/__pycache__
