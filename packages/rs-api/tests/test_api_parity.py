@@ -17,10 +17,18 @@ import pytest
 from fastapi.testclient import TestClient
 from rs_api import create_app
 from rs_core.diff import snapshot_digest
-from rs_core.models import ToolCall, Verdict
+from rs_core.models import ToolCall
 from rs_suite import VARIANTS, knob, task_ids
 from rs_world import SCHEMA, WorldExecutor, golden, load_task
-from rsapi_helpers import Api, instance_plans, own_seed, reference_episode, reference_verifier
+from rsapi_helpers import (
+    Api,
+    api_verdict,
+    expected_verdict,
+    instance_plans,
+    own_seed,
+    reference_episode,
+    reference_verifier,
+)
 
 TASKS = task_ids()
 SEEDS = (42, 7, 13)  # 42 is every task's own seed; 7 and 13 are procedural instances on other worlds
@@ -32,21 +40,6 @@ EXECUTOR = WorldExecutor()
 def api() -> Iterator[Api]:
     with TestClient(create_app(allowed_hosts=["testserver"])) as client:
         yield Api(client)
-
-
-def expected_verdict(verdict: Verdict) -> dict[str, Any]:
-    return {
-        "passed": verdict.passed,
-        "reward": verdict.reward,
-        "checks": len(verdict.checks),
-        "failed": [check.model_dump(mode="json") for check in verdict.checks if not check.passed],
-        "not_evaluated": list(verdict.not_evaluated),
-        "error": verdict.error,
-    }
-
-
-def api_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
-    return {key: verdict[key] for key in ("passed", "reward", "checks", "failed", "not_evaluated", "error")}
 
 
 # ---------------------------------------------------------------- the core parity test

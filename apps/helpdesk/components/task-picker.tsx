@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
+import { useEvalMode } from "@/lib/mode";
 import type { TaskInfo } from "@/lib/types";
 
 import { ThemeToggle } from "./theme";
@@ -25,6 +26,9 @@ export function TaskPicker() {
   const [failure, setFailure] = useState<string | null>(null);
   const [openId, setOpenId] = useState("");
   const ids = { query: useId(), category: useId(), split: useId(), seed: useId(), open: useId() };
+  // Eval mode: episodes come from the harness (POST /episodes), one per task; the console starts none.
+  const evalMode = useEvalMode();
+  const canStart = evalMode === false;
 
   useEffect(() => {
     let live = true;
@@ -149,6 +153,13 @@ export function TaskPicker() {
           </p>
         </div>
 
+        {evalMode ? (
+          <p className="border-b border-line px-4 py-2.5 text-[12.5px] text-fg-muted" role="note">
+            Starting episodes here is off: rs-api runs in eval mode, where the harness starts each episode (one per
+            task) and opens it at <Mono>/episodes/&lt;id&gt;</Mono>.
+          </p>
+        ) : null}
+
         {failure ? (
           <div className="border-b border-line px-4 py-3">
             <Notice tone="bad" title="Could not start">
@@ -191,7 +202,7 @@ export function TaskPicker() {
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={!seedValid || starting !== null}
+                  disabled={!canStart || !seedValid || starting !== null}
                   onClick={() => start(task)}
                   aria-label={`Start ${task.title} (${task.id})${seedValue !== undefined ? ` on seed ${seedValue}` : ""}`}
                   className="w-16"
@@ -221,7 +232,8 @@ export function TaskPicker() {
         </div>
         <Button type="submit">Open</Button>
         <p className="basis-full text-[12px] text-fg-subtle">
-          The API is <Mono>{api.base}</Mono>. Episodes live in its memory until it restarts.
+          The API is <Mono>{api.base}</Mono>. Episodes live in its memory until it restarts; past its cap on live
+          episodes (<Mono>--max-episodes</Mono>), the least recently used is dropped.
         </p>
       </form>
     </div>

@@ -7,7 +7,7 @@ from typing import Any
 
 import rs_suite
 from fastapi.testclient import TestClient
-from rs_core.models import Episode
+from rs_core.models import Episode, Verdict
 from rs_core.protocols import Verifier
 from rs_suite import answer_is_claim, build_spec, claim_pattern
 from rs_suite.suite import NOOP_SUMMARY
@@ -51,6 +51,21 @@ def reference_verifier(task_id: str, seed: int, variant: str) -> Verifier:
         claim_pattern=claim_pattern(task_id),
         answer_is_claim=answer_is_claim(task_id),
     )
+
+
+def expected_verdict(verdict: Verdict) -> dict[str, Any]:
+    return {
+        "passed": verdict.passed,
+        "reward": verdict.reward,
+        "checks": len(verdict.checks),
+        "failed": [check.model_dump(mode="json") for check in verdict.checks if not check.passed],
+        "not_evaluated": list(verdict.not_evaluated),
+        "error": verdict.error,
+    }
+
+
+def api_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
+    return {key: verdict[key] for key in ("passed", "reward", "checks", "failed", "not_evaluated", "error")}
 
 
 @dataclass(frozen=True)
