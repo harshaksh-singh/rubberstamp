@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .design import Manifest, load_manifest, save_manifest
-from .rollouts import Arm, Phase, RolloutStore
+from .rollouts import Arm, Phase, RolloutRecord, RolloutStore
 
 DRY_ATTEMPT = "dry"  # the dry run's fixed attempt, so two dry runs give byte-identical tables
 
@@ -51,6 +51,23 @@ def run_dir(out: Path, label: str, seed: int, phase: Phase) -> Path:
 
 def run_id(name: str, label: str, seed: int, phase: Phase, attempt: str) -> str:
     return f"{name}-base-{attempt}" if phase == "base" else f"{name}-{label}-s{seed}-{attempt}"
+
+
+def is_scripted(record: RolloutRecord) -> bool:
+    """A dry run's record: its run id ends with the dry run's fixed attempt, which no real attempt (a UTC time)
+    can produce."""
+    return record.run_id.endswith(f"-{DRY_ATTEMPT}")
+
+
+def real_runs(out: Path) -> list[str]:
+    """What in OUT came from real (GPU) invocations, which a dry run must not overwrite: rollouts in a run
+    directory (base/ or <arm>/seed<k>/, never the dry run's own OUT/rollouts.jsonl), the base-sweep gate's
+    report, or a pinned design with no dry-run contract next to it (the dry run writes trl_contract.json first)."""
+    found = sorted(str(p.relative_to(out)) for p in out.rglob("rollouts.jsonl") if p.parent != out)
+    found += [name for name in ("base_gate.json",) if (out / name).exists()]
+    if (out / "manifest.json").exists() and not (out / "trl_contract.json").exists():
+        found.append("manifest.json")
+    return found
 
 
 # ---------------------------------------------------------------- the pinned design

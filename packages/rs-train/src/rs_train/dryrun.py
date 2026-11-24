@@ -26,7 +26,7 @@ from typing import Any
 
 from .analysis import analyze, write_json
 from .config import TrainConfig
-from .design import Manifest
+from .design import Manifest, save_manifest
 from .env import LoopholeEnv
 from .opens import prior_vs_measured
 from .preflight import behaviour_problems
@@ -270,7 +270,8 @@ def dry_run(
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     contract = trl_contract(cfg, world, manifest, out)
-    write_json(out / "trl_contract.json", contract)
+    write_json(out / "trl_contract.json", contract)  # first: it marks OUT as a dry run's (runs.real_runs)
+    save_manifest(design or manifest, out / "manifest.json")  # a rehearsal rewrites everything it wrote before
     if found := contract["context"]["problems"] + contract["behaviours"]["problems"]:
         raise ValueError("the pre-flight failed (see trl_contract.json):\n  " + "\n  ".join(found))
     if skipped := contract["context"].get("skipped"):

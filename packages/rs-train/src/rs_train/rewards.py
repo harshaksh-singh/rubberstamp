@@ -12,8 +12,9 @@ A verifier harness error returns None: TRL turns it into NaN and leaves it out o
 
 Two more zero-weight signals say how rollouts ended, because TRL's own tool metrics cannot see it:
 `unparsed_tool_call` (a tool call TRL could not parse ended the rollout; `tools/failure_frequency` only
-counts calls that parsed) and `cut_off` (the rollout stopped with tool calls pending, at the iteration cap
-or the token budget).
+counts calls that parsed) and `cut_off` (the rollout's last turn still holds tool calls: at the iteration cap
+they never ran; at the token budget TRL 1.18.2 ran them and then dropped their outputs, so they are recorded and
+graded although the model never saw the results).
 """
 
 from __future__ import annotations
