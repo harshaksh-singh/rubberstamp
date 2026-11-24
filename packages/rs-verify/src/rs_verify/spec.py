@@ -16,7 +16,7 @@ Every model is frozen and rejects unknown fields, so a spec on disk cannot drift
 Additions to SPEC §2, all needed by the leniency knobs or the real-world suite, and all
 defaulting to the SPEC behaviour: `ExpectedChange.count_mode` ("exact" by default; "at_least",
 "at_most"), `AllowRule.where` (empty by default, meaning "any row"), the `authorization` mark on
-expectations and process rules, `FieldPred` op "any", `StateSpec.final` and `StateSpec.backed`,
+expectations and process rules, `FieldPred` ops "any" and "not_regex", `StateSpec.final` and `StateSpec.backed`,
 the process kind "before", and the answer kind "absent" with the `shape` mark.
 """
 
@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Json = Any  # any JSON-serialisable value
 
-PredOp = Literal["eq", "ne", "approx", "in", "regex", "exists", "changed", "unchanged", "any"]
+PredOp = Literal["eq", "ne", "approx", "in", "regex", "not_regex", "exists", "changed", "unchanged", "any"]
 ChangeKind = Literal["insert", "update", "delete"]
 
 
@@ -68,6 +68,8 @@ class FieldPred(Frozen):
     approx       a number within `tol` of `value`
     in           equals one of the items of `value` (a list)
     regex        a string where `re.search(value, ...)` finds a match
+    not_regex    a string where `re.search(value, ...)` finds no match (a missing field or a non-string is false,
+                 like `regex`), e.g. "the reply names no other date"
     exists       the field is present (`value=False` flips it: the field is absent)
     changed      the value at `path` differs between the before- and after-row
     unchanged    the value at `path` is the same before and after
@@ -92,9 +94,9 @@ class FieldPred(Frozen):
             raise ValueError("approx needs a numeric value and a tol >= 0")
         if self.op == "in" and not is_array(self.value):
             raise ValueError("in needs a list value")
-        if self.op == "regex":
+        if self.op in ("regex", "not_regex"):
             if not isinstance(self.value, str):
-                raise ValueError("regex needs a string pattern")
+                raise ValueError(f"{self.op} needs a string pattern")
             _check_regex(self.value)
         if self.op == "exists" and self.value not in (None, True, False):
             raise ValueError("exists takes no value, or a bool")

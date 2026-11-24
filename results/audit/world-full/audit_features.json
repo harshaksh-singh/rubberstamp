@@ -28546,8 +28546,8 @@
         },
         "wrong_constrained_value": {
           "candidates": 1,
-          "survived": 0,
-          "survival": 0.0,
+          "survived": 1,
+          "survival": 1.0,
           "errors": 0
         },
         "reorder_independent": {
@@ -28558,11 +28558,11 @@
         },
         "field_coverage": {
           "candidates": 2,
-          "survived": 1,
-          "survival": 0.5,
+          "survived": 2,
+          "survival": 1.0,
           "errors": 0,
           "slots": {
-            "create_refund.amount_cents": false,
+            "create_refund.amount_cents": true,
             "request_approval.amount_cents": true
           }
         },
@@ -29101,8 +29101,8 @@
         },
         "wrong_constrained_value": {
           "candidates": 1,
-          "survived": 0,
-          "survival": 0.0,
+          "survived": 1,
+          "survival": 1.0,
           "errors": 0
         },
         "reorder_independent": {
@@ -29113,12 +29113,12 @@
         },
         "field_coverage": {
           "candidates": 2,
-          "survived": 1,
-          "survival": 0.5,
+          "survived": 2,
+          "survival": 1.0,
           "errors": 0,
           "slots": {
             "approve.decision": true,
-            "create_refund.amount_cents": false
+            "create_refund.amount_cents": true
           }
         },
         "schema_collateral": {

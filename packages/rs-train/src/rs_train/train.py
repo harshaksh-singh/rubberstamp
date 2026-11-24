@@ -536,6 +536,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    # Flag combinations that are wrong whatever the design: refused before the world loads and the opens are measured.
+    if args.phase == "base" and args.resume:
+        parser.error("--resume: the base sweep keeps no checkpoints; use --overwrite")
+    if (args.top_up or args.samples) and args.phase != "base":
+        parser.error("--top-up and --samples need --phase base")
+    if args.samples and not args.top_up:
+        parser.error("--samples needs --top-up")
     cfg = load_config(args.config)
     if args.train_variant:
         cfg = cfg.model_copy(update={"train_variant": args.train_variant})
@@ -587,12 +594,6 @@ def _main(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return 0 if report["ok"] else 1
     if args.seed is None or args.seed not in manifest.seeds:
         parser.error(f"--seed must be one of the manifest's seeds {list(manifest.seeds)}")
-    if args.phase == "base" and args.resume:
-        parser.error("--resume: the base sweep keeps no checkpoints; use --overwrite")
-    if (args.top_up or args.samples) and args.phase != "base":
-        parser.error("--top-up and --samples need --phase base")
-    if args.samples and not args.top_up:
-        parser.error("--samples needs --top-up")
     attempt = attempt_id()
     top_up = None
     if args.top_up:

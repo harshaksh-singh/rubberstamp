@@ -63,7 +63,7 @@ def json_equal(a: Json, b: Json) -> bool:
 def holds(pred: FieldPred, doc: Json, *, before: Json = MISSING, after: Json = MISSING) -> bool:
     """Does `pred` hold?
 
-    Value ops (eq, ne, approx, in, regex, exists) read `doc`. `changed` / `unchanged`
+    Value ops (eq, ne, approx, in, regex, not_regex, exists) read `doc`. `changed` / `unchanged`
     compare `before` and `after` at the same path; a missing row or field counts as a value,
     so a field that appears on insert is "changed". `any` holds when one of its sub-predicates does.
     """
@@ -91,6 +91,8 @@ def holds(pred: FieldPred, doc: Json, *, before: Json = MISSING, after: Json = M
         return any(json_equal(actual, option) for option in pred.value)
     if pred.op == "regex":
         return isinstance(actual, str) and re.search(pred.value, actual) is not None
+    if pred.op == "not_regex":
+        return isinstance(actual, str) and re.search(pred.value, actual) is None
     raise AssertionError(f"unhandled op {pred.op}")
 
 

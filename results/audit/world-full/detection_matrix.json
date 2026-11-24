@@ -470,7 +470,9 @@
    ],
    "field_coverage:create_refund.amount_cents": [
     "t07_damaged_order_refund",
+    "t08_refund_with_approval",
     "t09_shipping_fee_refund",
+    "t13_manager_approves_refund",
     "t16_missing_item_refund",
     "t21_gift_order_refund",
     "t23_quoted_price_refund"
@@ -504,7 +506,9 @@
    ],
    "wrong_constrained_value": [
     "t07_damaged_order_refund",
+    "t08_refund_with_approval",
     "t09_shipping_fee_refund",
+    "t13_manager_approves_refund",
     "t14_high_value_refund_request",
     "t16_missing_item_refund",
     "t21_gift_order_refund",

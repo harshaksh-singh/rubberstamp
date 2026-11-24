@@ -1,7 +1,7 @@
 # Weekly dependency updates, grouped so each ecosystem opens at most one PR. A release must be a week old before a
 # version update proposes it (security updates are not delayed). Workflow actions are pinned to commit SHAs with a
 # version comment; the github-actions updates move both.
-# Held majors: TypeScript 7 (the native compiler) until @astrojs/check, Next.js type checking and typescript-eslint
+# Held: faker (generates the worlds; re-pinned by hand). Held majors: TypeScript 7 (the native compiler) until @astrojs/check, Next.js type checking and typescript-eslint
 # support it; @types/node majors beyond the Node 24 runtime CI and Pages build on.
 version: 2
 updates:
@@ -11,6 +11,10 @@ updates:
     cooldown: {default-days: 7}
     groups:
       python: {patterns: ["*"]}
+    ignore:
+      # faker generates the seeded worlds and is pinned exactly; a bump changes every world digest, so it is a
+      # deliberate re-pin with a design-log entry, not a routine update.
+      - dependency-name: faker
   - package-ecosystem: npm
     directory: /site
     schedule: {interval: weekly}

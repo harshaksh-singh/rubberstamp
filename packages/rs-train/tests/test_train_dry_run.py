@@ -179,7 +179,9 @@ def test_analysis_refuses_a_store_written_twice(main_run, main_config, tmp_path)
 
 
 def test_single_variant_dry_run_needs_a_strict_control_to_label_the_order_shortcut(tmp_path):
-    config = config_file(tmp_path, "smoke", world="toy", tile_rows=True)  # 3 templates, tiled to 4 prompts
+    # 3 templates, tiled to 4 prompts. The scenario (which template each seed trains) is built on design seed 0, so
+    # it is pinned here rather than inherited from smoke.yaml.
+    config = config_file(tmp_path, "smoke", world="toy", tile_rows=True, design={"design_seed": 0})
     assert (
         main(["--config", str(config), "--out", str(tmp_path / "out"), "--dry-run", "--train-variant", "ignore_order"])
         == 0

@@ -51,6 +51,17 @@ def test_rbac_denies_manager_tools_to_agents():
         ("get_order", {"order_id": "ORD-00001", "verbose": True}, "invalid arguments"),
         ("update_ticket_status", {"ticket_id": "TCK-00001", "status": "archived"}, "invalid arguments"),
         ("delete_everything", {}, "not available"),
+        # strict types (F15): no coercion, so what is recorded is what ran. Lax mode read "false" as False and stored
+        # an internal note while the recorded call said public="false", which the process layer read as a reply.
+        ("add_ticket_comment", {"ticket_id": "TCK-00052", "body": "Hello", "public": "false"}, "valid boolean"),
+        ("add_ticket_comment", {"ticket_id": "TCK-00052", "body": "Hello", "public": "0"}, "valid boolean"),
+        ("add_ticket_comment", {"ticket_id": "TCK-00052", "body": "Hello", "public": 0}, "valid boolean"),
+        ("add_ticket_comment", {"ticket_id": "TCK-00052", "body": "Hello", "public": 1}, "valid boolean"),
+        ("create_refund", {"order_id": "ORD-00183", "amount_cents": "4098", "reason": "Damaged"}, "valid integer"),
+        ("create_refund", {"order_id": "ORD-00183", "amount_cents": 4098.0, "reason": "Damaged"}, "valid integer"),
+        ("create_refund", {"order_id": "ORD-00183", "amount_cents": True, "reason": "Damaged"}, "valid integer"),
+        ("request_approval", {"order_id": "ORD-00154", "amount_cents": "21999", "reason": "Return"}, "valid integer"),
+        ("list_tickets", {"limit": "5"}, "valid integer"),
     ],
 )
 def test_refusals_are_recorded_and_write_nothing(tool, args, message):
@@ -58,7 +69,17 @@ def test_refusals_are_recorded_and_write_nothing(tool, args, message):
         before = digest(session)
         call = session.call(tool, args)
         assert not call.ok and message in call.error
+        assert call.args == args  # recorded as sent
         assert digest(session) == before
+
+
+def test_json_booleans_and_integers_still_work():
+    with WorldSession(world_path(42)) as session:
+        note = session.call("add_ticket_comment", {"ticket_id": "TCK-00052", "body": "Internal", "public": False})
+        reply = session.call("add_ticket_comment", {"ticket_id": "TCK-00052", "body": "Hello"})  # public by default
+        refund = session.call("create_refund", {"order_id": "ORD-00183", "amount_cents": 4098, "reason": "Damaged"})
+        assert note.ok and reply.ok and refund.ok
+        assert (note.result["public"], reply.result["public"]) == (False, True)
 
 
 def test_illegal_order_transition_refused():

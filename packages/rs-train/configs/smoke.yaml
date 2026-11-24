@@ -19,7 +19,9 @@ base_samples: 64           # base sweep: rollouts per template (a multiple of G)
 keep_states: false         # rescoring replays trajectories through the deterministic executor
 
 design:
-  design_seed: 0
+  # The same design seed as main.yaml, so both hold out the same templates: task.yaml's split=test
+  # (tests/integration/test_benchmark_hygiene.py).
+  design_seed: 6
   seeds: [0, 1, 2]
   heldout_fraction: 0.2
   strict_share: 0.25

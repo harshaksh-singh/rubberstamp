@@ -20,7 +20,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "faker>=40.63.0",
+    "faker==40.63.0",  # exact: seeded Faker output (customer names) shifts the world generator's RNG stream
     "pydantic>=2.14.4",
     "pyyaml>=6.0.4",
     "rs-core",
