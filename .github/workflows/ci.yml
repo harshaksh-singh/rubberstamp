@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 40
     env:
       HF_HUB_OFFLINE: "1"   # tests that need a cached tokenizer skip themselves
+      COVERAGE_CORE: sysmon # line coverage via sys.monitoring: no measurable overhead (the default tracer nearly doubles run time)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
