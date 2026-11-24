@@ -19,4 +19,4 @@ repos:
         entry: uv run python scripts/site_data.py --check
         language: system
         pass_filenames: false
-        files: ^(results/|packages/rs-world/tasks/|scripts/site_data\.py)
+        files: ^(results/|packages/rs-world/src/rs_world/task_files/|scripts/site_data\.py)

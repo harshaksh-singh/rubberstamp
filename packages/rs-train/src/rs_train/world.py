@@ -2,7 +2,7 @@
 
 `world: toy` in a config loads the bundled toy world (rs_train.toy). Any other value is an import path
 `package.module:function` returning a `World`, such as `rs_train.helpdesk:world`, the helpdesk world and its
-graders (the only module of this package that imports rs-world and rs-suite).
+graders (the only module of this package that uses the helpdesk world).
 """
 
 from __future__ import annotations

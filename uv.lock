@@ -3485,19 +3485,24 @@ name = "rs-suite"
 version = "0.1.0"
 source = { editable = "packages/rs-suite" }
 dependencies = [
-    { name = "rs-audit" },
     { name = "rs-core" },
     { name = "rs-verify" },
     { name = "rs-world" },
 ]
 
+[package.optional-dependencies]
+audit = [
+    { name = "rs-audit" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "rs-audit", editable = "packages/rs-audit" },
+    { name = "rs-audit", marker = "extra == 'audit'", editable = "packages/rs-audit" },
     { name = "rs-core", editable = "packages/rs-core" },
     { name = "rs-verify", editable = "packages/rs-verify" },
     { name = "rs-world", editable = "packages/rs-world" },
 ]
+provides-extras = ["audit"]
 
 [[package]]
 name = "rs-train"
@@ -3563,20 +3568,25 @@ version = "0.1.0"
 source = { editable = "packages/rs-world" }
 dependencies = [
     { name = "faker" },
-    { name = "fastmcp" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rs-core" },
 ]
 
+[package.optional-dependencies]
+mcp = [
+    { name = "fastmcp" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "faker", specifier = ">=40.63.0" },
-    { name = "fastmcp", specifier = ">=4.2.4" },
+    { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=4.2.4" },
     { name = "pydantic", specifier = ">=2.14.4" },
     { name = "pyyaml", specifier = ">=6.0.4" },
     { name = "rs-core", editable = "packages/rs-core" },
 ]
+provides-extras = ["mcp"]
 
 [[package]]
 name = "rubberstamp"
@@ -3586,10 +3596,10 @@ dependencies = [
     { name = "rs-api" },
     { name = "rs-audit" },
     { name = "rs-core" },
-    { name = "rs-suite" },
+    { name = "rs-suite", extra = ["audit"] },
     { name = "rs-train" },
     { name = "rs-verify" },
-    { name = "rs-world" },
+    { name = "rs-world", extra = ["mcp"] },
 ]
 
 [package.optional-dependencies]
@@ -3612,11 +3622,11 @@ requires-dist = [
     { name = "rs-api", editable = "packages/rs-api" },
     { name = "rs-audit", editable = "packages/rs-audit" },
     { name = "rs-core", editable = "packages/rs-core" },
-    { name = "rs-suite", editable = "packages/rs-suite" },
+    { name = "rs-suite", extras = ["audit"], editable = "packages/rs-suite" },
     { name = "rs-train", editable = "packages/rs-train" },
     { name = "rs-train", extras = ["gpu"], marker = "extra == 'gpu'", editable = "packages/rs-train" },
     { name = "rs-verify", editable = "packages/rs-verify" },
-    { name = "rs-world", editable = "packages/rs-world" },
+    { name = "rs-world", extras = ["mcp"], editable = "packages/rs-world" },
 ]
 provides-extras = ["gpu"]
 

@@ -2,7 +2,9 @@
 name = "rubberstamp"
 version = "0.0.1"
 requires-python = ">=3.12,<3.14"
-dependencies = ["rs-core", "rs-verify", "rs-audit", "rs-world", "rs-suite", "rs-train", "rs-api"]
+# The workspace installs the optional extras too (the MCP server, the audit target), so it behaves as before the
+# split; a wheel of rs-world or rs-suite alone stays free of fastmcp and rs-audit.
+dependencies = ["rs-core", "rs-verify", "rs-audit", "rs-world[mcp]", "rs-suite[audit]", "rs-train", "rs-api"]
 
 [project.optional-dependencies]
 # vLLM for the rented Linux GPU box: `uv sync --extra gpu` from the workspace root (rs-train defines the extra).

@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 from rs_suite import episode, knob, plans, task_ids, verifier
 from rs_world import REGISTRY, load_task
-from rs_world.tasks import task_file
+from rs_world.tasks import TASK_FILES, task_file
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "site" / "src" / "data" / "site.json"
@@ -41,7 +41,7 @@ def _calls(plan) -> list[dict]:
 def tasks(matrix: dict) -> list[dict]:
     out = []
     for task_id in task_ids():
-        spec = yaml.safe_load((ROOT / "packages" / "rs-world" / "tasks" / task_id / "task.yaml").read_text())
+        spec = yaml.safe_load(TASK_FILES.joinpath(task_id, "task.yaml").read_text(encoding="utf-8"))
         shortcut = spec["shortcut"]
         p = plans(task_id)
         out.append(
