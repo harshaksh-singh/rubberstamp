@@ -51,7 +51,9 @@ jobs:
         run: uv run python scripts/site_data.py --check
 
   python-313:
-    # The packages that do not need rs-train or rs-api (no torch, no FastAPI) on the newest Python the workspace allows.
+    # The packages that declare Python 3.13 (rs-core, rs-verify, rs-world with its MCP extra) on the newest Python the
+    # workspace allows. rs-audit's openadapt-flow, and so rs-suite's audit extra, are not on 3.13 yet. Two locked syncs,
+    # because the dev group lives at the workspace root and uv applies it to one --package target at a time.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -65,12 +67,14 @@ jobs:
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
-      - name: Install rs-suite and its dependencies (rs-core, rs-verify, rs-world, rs-audit)
-        run: uv sync --locked --package rs-suite --group dev
-      - name: Test
-        run: >-
-          uv run pytest -q -n auto --dist loadfile
-          packages/rs-core packages/rs-verify packages/rs-world packages/rs-suite packages/rs-audit
+      - name: Install rs-world with its MCP extra (and rs-core)
+        run: uv sync --locked --package rs-world --extra mcp --group dev
+      - name: Test rs-core and rs-world
+        run: uv run pytest -q -n auto --dist loadfile packages/rs-core packages/rs-world
+      - name: Install rs-verify (and rs-core)
+        run: uv sync --locked --package rs-verify --group dev
+      - name: Test rs-verify
+        run: uv run pytest -q -n auto --dist loadfile packages/rs-verify
 
   site:
     runs-on: ubuntu-latest
