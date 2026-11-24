@@ -1,0 +1,77 @@
+# The Inspect integration (integrations/inspect: its own uv project and lock, inspect-ai pinned to 0.3.292): lint,
+# type-check, the generated files' --check, and the tests, which include the conformance proof (all 500 instances x 3
+# plans through the Inspect task, 25 evals of 60 samples) and check_isolation at concurrency 16. No model API and no
+# Docker: the evals replay scripted plans (Inspect's mockllm, and the package's rs_replay model for the CLI test), and
+# both report token usage, so no tiktoken download either. The full proof script (isolation on all 1,500 runs, about
+# 10 minutes) runs on manual dispatch only.
+# Actions are pinned to commit SHAs (the same pins as ci.yml).
+name: Integration (Inspect)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-inspect-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      INSPECT_DISPLAY: none
+    defaults:
+      run:
+        working-directory: integrations/inspect
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          cache-suffix: integration-inspect
+      - name: Install (rs-core, rs-verify, rs-world, rs-suite as editable path dependencies; no rs-train, no torch)
+        run: uv sync --locked
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Type-check
+        run: uv run pyright -p .
+      - name: Generated files are current (inspect_manifest.json, results/replay_eval.json)
+        run: |
+          uv run python scripts/inspect_manifest.py --check
+          uv run python scripts/replay_eval.py --check
+      - name: Test (conformance on 500 x 3 through Inspect, isolation at 16, reward rule, rescoring, faults)
+        run: uv run pytest -q -n 4
+
+  proof:
+    # The whole proof in one process: check on 1,500 runs in three 500-sample evals, then check_isolation on all
+    # 1,500 runs at concurrency 16.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      INSPECT_DISPLAY: none
+    defaults:
+      run:
+        working-directory: integrations/inspect
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          cache-suffix: integration-inspect
+      - name: Install
+        run: uv sync --locked
+      - name: Conformance proof (all 500 instances x 3 plans; isolation at concurrency 16)
+        run: uv run python scripts/conformance.py
