@@ -83,7 +83,13 @@ def check(work: Path) -> dict:
     )
     requirements = work / "requirements.txt"
     requirements.write_text(locked + "".join(f"{wheel}\n" for wheel in wheels))
-    run(uv, "pip", "sync", "--offline", "--python", python, requirements)
+    # Offline when uv's cache holds the index metadata (a dev machine); else fetch the locked pins (a fresh CI cache).
+    try:
+        run(uv, "pip", "sync", "--offline", "--python", python, requirements)
+    except RuntimeError as exc:
+        if "network was disabled" not in str(exc):
+            raise
+        run(uv, "pip", "sync", "--python", python, requirements)
     run(uv, "pip", "check", "--python", python)  # the wheels' own Requires-Dist are all satisfied
     installed = {
         line.split()[0].lower(): line.split()[1]
