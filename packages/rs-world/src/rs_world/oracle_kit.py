@@ -1,4 +1,4 @@
-"""Helpers for the hand-written task oracles in `tasks/<id>/oracle.py`.
+"""Helpers for the hand-written task oracles in `task_files/<id>/oracle.py`.
 
 An oracle module defines three functions of `db`, a read-only connection to the task's seeded world
 (before any call is made):

@@ -3,12 +3,18 @@
 `WorldSession` is the one place where calls are executed and recorded. The executor replays a list
 of calls through it; the MCP server forwards each client call to it. Both therefore produce the same
 state and the same recorded `ToolCall`s.
+
+The world cache (`world_path`, `initial_snapshot`) is safe to fill from many threads: each seed is built once,
+under its own lock, and other seeds keep building in parallel. `prewarm(seeds)` builds them up front, so a
+server's first episodes do not pay the cold build. A `WorldSession` itself belongs to one thread at a time (its
+SQLite connection keeps sqlite3's default `check_same_thread=True`).
 """
 
 from __future__ import annotations
 
 import os
 import tempfile
+import threading
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -27,26 +33,62 @@ DEFAULT_PERSONA = Persona(id="agent-01", role="agent")
 _worlds: dict[int, Path] = {}
 _initial: dict[int, Snapshot] = {}
 _cache_dir: tempfile.TemporaryDirectory[str] | None = None
+_cache_lock = threading.Lock()  # guards `_cache_dir` and `_seed_locks`
+_seed_locks: dict[int, threading.RLock] = {}
+
+
+def _seed_lock(seed_value: int) -> threading.RLock:
+    with _cache_lock:
+        lock = _seed_locks.get(seed_value)
+        if lock is None:
+            lock = _seed_locks[seed_value] = threading.RLock()
+        return lock
+
+
+def _cache_root() -> str:
+    global _cache_dir
+    with _cache_lock:
+        if _cache_dir is None:
+            _cache_dir = tempfile.TemporaryDirectory(prefix="rs-world-")
+        return _cache_dir.name
 
 
 def world_path(seed_value: int) -> Path:
-    """The seeded world file for `seed_value`, built once per process into a private temp dir."""
-    global _cache_dir
-    if seed_value not in _worlds:
-        if _cache_dir is None:
-            _cache_dir = tempfile.TemporaryDirectory(prefix="rs-world-")
-        _worlds[seed_value] = seed(seed_value, _cache_dir.name)
-    return _worlds[seed_value]
+    """The seeded world file for `seed_value`, built once per process into a private temp dir (thread-safe)."""
+    path = _worlds.get(seed_value)
+    if path is not None:
+        return path
+    with _seed_lock(seed_value):
+        path = _worlds.get(seed_value)
+        if path is None:  # the first thread here builds it; the others waited on the lock and reuse it
+            path = _worlds[seed_value] = seed(seed_value, _cache_root())
+        return path
 
 
 def initial_snapshot(seed_value: int) -> Snapshot:
-    if seed_value not in _initial:
-        conn = connect(world_path(seed_value), readonly=True)
-        try:
-            _initial[seed_value] = read_snapshot(conn)
-        finally:
-            conn.close()
-    return _initial[seed_value]
+    """The seeded world's state before any call, read once per process (thread-safe)."""
+    snapshot = _initial.get(seed_value)
+    if snapshot is not None:
+        return snapshot
+    with _seed_lock(seed_value):
+        snapshot = _initial.get(seed_value)
+        if snapshot is None:
+            conn = connect(world_path(seed_value), readonly=True)
+            try:
+                snapshot = _initial[seed_value] = read_snapshot(conn)
+            finally:
+                conn.close()
+        return snapshot
+
+
+def prewarm(seeds: Iterable[int]) -> dict[int, Path]:
+    """Build (or reuse) the world file and the initial snapshot of every seed now, e.g. at server start-up, so no
+    episode pays a cold build. Returns seed -> world file."""
+    out = {}
+    for seed_value in seeds:
+        out[seed_value] = world_path(seed_value)
+        initial_snapshot(seed_value)
+    return out
 
 
 class WorldSession:

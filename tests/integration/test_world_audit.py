@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 
 import pytest
-from rs_suite.suite import existing_records, free_text_fields, repeatable_creates, task_ids
+from rs_suite.audit_target import existing_records, free_text_fields, repeatable_creates
+from rs_suite.suite import task_ids
 from rs_world.session import initial_snapshot
 from rs_world.tasks import task_file
 

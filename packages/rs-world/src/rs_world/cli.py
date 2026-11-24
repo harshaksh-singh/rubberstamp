@@ -2,6 +2,8 @@
 
 rs-world seed --seed 42 --out var/worlds     # build a world file, print its path and digest
 rs-world serve --task t07_damaged_order_refund  # MCP over stdio on a fresh copy of the task's world
+rs-world serve --task t07_damaged_order_refund --seed 7 --transport http --host 0.0.0.0 --port 8000
+                                              # the task's instance on world seed 7, over streamable HTTP at /mcp
 rs-world manifest --write tool_manifest.json  # the committed tool manifest (tested for drift)
 rs-world tasks --split train                  # list tasks with their category and blind spot
 """
@@ -29,11 +31,14 @@ def main(argv: list[str] | None = None) -> None:
     p_seed = commands.add_parser("seed", help="build a seeded world file")
     p_seed.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p_seed.add_argument("--out", type=Path, default=None)
-    p_serve = commands.add_parser("serve", help="serve a fresh world over MCP")
-    p_serve.add_argument("--task", help="task id: use its seed, persona and tools")
-    p_serve.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    p_serve.add_argument("--role", choices=["agent", "manager"], default="agent")
+    p_serve = commands.add_parser("serve", help="serve a fresh world over MCP (needs the rs-world[mcp] extra)")
+    p_serve.add_argument("--task", help="task id: use its persona and tools, and its own seed unless --seed is given")
+    p_serve.add_argument(
+        "--seed", type=int, default=None, help=f"world seed (default: the task's own, else {DEFAULT_SEED})"
+    )
+    p_serve.add_argument("--role", choices=["agent", "manager"], default="agent", help="persona without --task")
     p_serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    p_serve.add_argument("--host", default="127.0.0.1", help="HTTP bind address (default: loopback only)")
     p_serve.add_argument("--port", type=int, default=8000)
     p_manifest = commands.add_parser("manifest", help="print or write the tool manifest")
     p_manifest.add_argument("--write", type=Path, default=None)
@@ -60,20 +65,23 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _serve(args: argparse.Namespace) -> None:
-    from .mcp_server import build_mcp
+    try:
+        from .mcp_server import build_mcp
+    except ImportError as exc:  # fastmcp is the optional `mcp` extra
+        raise SystemExit(f"rs-world serve needs the MCP extra: pip install 'rs-world[mcp]' ({exc})") from None
 
     if args.task:
         from .executor import WorldExecutor
         from .tasks import load_task
 
-        session = WorldExecutor().session(load_task(args.task))
+        session = WorldExecutor().session(load_task(args.task, args.seed))
     else:
         persona = Persona(id=PERSONA_IDS[args.role], role=args.role)
-        session = WorldSession(world_path(args.seed), persona=persona)
+        session = WorldSession(world_path(DEFAULT_SEED if args.seed is None else args.seed), persona=persona)
     with session:
         server = build_mcp(session)
         if args.transport == "http":
-            server.run(transport="http", port=args.port, show_banner=False)
+            server.run(transport="http", host=args.host, port=args.port, show_banner=False)
         else:
             server.run(transport="stdio", show_banner=False)
 

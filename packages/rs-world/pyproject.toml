@@ -9,11 +9,15 @@ authors = [
 requires-python = ">=3.12, <3.14"
 dependencies = [
     "faker>=40.63.0",
-    "fastmcp>=4.2.4",
     "pydantic>=2.14.4",
     "pyyaml>=6.0.4",
     "rs-core",
 ]
+
+[project.optional-dependencies]
+# The MCP server (`rs_world.mcp_server`, `rs-world serve`). Everything else (seeding, tools, tasks, the executor)
+# works without it.
+mcp = ["fastmcp>=4.2.4"]
 
 [project.scripts]
 rs-world = "rs_world.cli:main"
