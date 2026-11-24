@@ -1,0 +1,27 @@
+[project]
+name = "rs-api"
+version = "0.1.0"
+description = "A local HTTP API over the Tarnwick Helpdesk world: episodes, tool calls and grading, for the helpdesk UI"
+readme = "README.md"
+requires-python = ">=3.12, <3.14"
+dependencies = [
+    "rs-core",
+    "rs-verify",
+    "rs-world",
+    "rs-suite",
+    "fastapi>=0.136.3,<0.137",
+    "uvicorn>=0.54.0,<0.55",
+]
+
+[project.scripts]
+rs-api = "rs_api.cli:main"
+
+[tool.uv.sources]
+rs-core = { workspace = true }
+rs-verify = { workspace = true }
+rs-world = { workspace = true }
+rs-suite = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
