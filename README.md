@@ -95,7 +95,7 @@ Everything up to the GPU runs works on a laptop (Python 3.12, [uv](https://docs.
 ```bash
 git clone https://github.com/harshaksh-singh/rubberstamp && cd rubberstamp
 uv sync
-uv run pytest -q                                        # the full suite (1,800+ tests)
+uv run pytest -q -n auto                                # the full suite (1,800+ tests), in parallel
 uv run python scripts/audit_world.py --families full    # Result 2: audit the helpdesk graders
 uv run python scripts/shortcut_matrix.py                # every shortcut against every grader variant
 ```

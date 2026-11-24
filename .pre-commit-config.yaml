@@ -1,0 +1,22 @@
+# pre-commit install   (then every commit runs these; `pre-commit run --all-files` checks everything)
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: cleanroom
+        name: cleanroom (private denylist, skipped when absent)
+        entry: bash scripts/cleanroom.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: site-data
+        name: site data is current
+        entry: uv run python scripts/site_data.py --check
+        language: system
+        pass_filenames: false
+        files: ^(results/|packages/rs-world/tasks/|scripts/site_data\.py)

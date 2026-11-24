@@ -34,7 +34,7 @@ jobs:
       - name: Type-check
         run: uv run pyright packages/rs-core/src packages/rs-verify/src packages/rs-audit/src packages/rs-world/src packages/rs-suite/src packages/rs-train/src
       - name: Test
-        run: uv run pytest -q
+        run: uv run pytest -q -n auto --dist loadfile
       - name: Site data is current
         run: uv run python scripts/site_data.py --check
 
