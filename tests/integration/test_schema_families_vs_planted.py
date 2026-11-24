@@ -67,10 +67,11 @@ def ignores_extra_fields():
     """Test-local blind spot: the expected row is still located and its expected values checked, but any other
     field of it may change too."""
     loose = AllowRule(table="tickets", kind="update", where=TICKET)
-    verifiers = {
-        t: SpecVerifier(s.model_copy(update={"state": s.state.model_copy(update={"allow": (loose,)})}), SCHEMA)
-        for t, s in SPECS.items()
-    }
+    verifiers = {}
+    for t, s in SPECS.items():
+        assert s.state is not None
+        state = s.state.model_copy(update={"allow": (loose,)})
+        verifiers[t] = SpecVerifier(s.model_copy(update={"state": state}), SCHEMA)
     return ByTask("ignores_extra_fields", verifiers)
 
 

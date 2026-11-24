@@ -1,5 +1,7 @@
-# Lint, type-check and test the Python workspace; check that the site's data is current and that the site builds;
+# Lint, type-check and test the Python workspace (with coverage), and the pure packages on Python 3.13; check that the
+# release metadata agrees, that the site's data and the README charts are current and that the site builds;
 # check the helpdesk app: rs-api's parity tests and an HTTP smoke test, and the UI's lint, type check and build.
+# Actions are pinned to commit SHAs (Dependabot's github-actions updates move the SHA and the version comment).
 name: CI
 
 on:
@@ -13,7 +15,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push supersedes a branch's or PR's run; every commit on main keeps its own result.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   python:
@@ -22,22 +25,52 @@ jobs:
     env:
       HF_HUB_OFFLINE: "1"   # tests that need a cached tokenizer skip themselves
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --locked
+        run: uv sync --locked   # the whole workspace: rs-train pulls torch and its CUDA wheels on Linux
       - name: Lint
         run: |
           uv run ruff check .
           uv run ruff format --check .
-      - name: Type-check
-        run: uv run pyright packages/rs-core/src packages/rs-verify/src packages/rs-audit/src packages/rs-world/src packages/rs-suite/src packages/rs-train/src
-      - name: Test
-        run: uv run pytest -q -n auto --dist loadfile
+      - name: Type-check (packages/*/src, scripts, tests; see [tool.pyright])
+        run: uv run pyright -p .
+      - name: Metadata is consistent (one version, license and authors everywhere)
+        run: uv run python scripts/check_metadata.py
+      - name: Test (with coverage)
+        run: uv run pytest -q -n auto --dist loadfile --cov --cov-report=
+      - name: Coverage report
+        run: |
+          uv run coverage report
+          { echo "## Python coverage"; echo; uv run coverage report --format=markdown; } >> "$GITHUB_STEP_SUMMARY"
       - name: Site data is current
         run: uv run python scripts/site_data.py --check
+
+  python-313:
+    # The packages that do not need rs-train or rs-api (no torch, no FastAPI) on the newest Python the workspace allows.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HF_HUB_OFFLINE: "1"
+      UV_PYTHON: "3.13"
+      UV_NO_SYNC: "1"   # `uv run` uses the environment synced below instead of syncing the whole workspace
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+      - name: Install rs-suite and its dependencies (rs-core, rs-verify, rs-world, rs-audit)
+        run: uv sync --locked --package rs-suite --group dev
+      - name: Test
+        run: >-
+          uv run pytest -q -n auto --dist loadfile
+          packages/rs-core packages/rs-verify packages/rs-world packages/rs-suite packages/rs-audit
 
   site:
     runs-on: ubuntu-latest
@@ -48,8 +81,10 @@ jobs:
       run:
         working-directory: site
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -57,21 +92,33 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      - name: README charts are current (docs/assets/*.svg from site.json)
+        run: |
+          npm run charts
+          if [ -n "$(git status --porcelain -- ../docs/assets)" ]; then
+            git status --short -- ../docs/assets
+            echo "::error::docs/assets is out of date: run 'cd site && npm run charts' and commit the SVGs"
+            exit 1
+          fi
 
   helpdesk-api:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       HF_HUB_OFFLINE: "1"
+      UV_NO_SYNC: "1"   # `uv run` uses the rs-api environment synced below instead of syncing the whole workspace
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
-      - name: Install
-        run: uv sync --locked
+          cache-suffix: rs-api   # a smaller install than the python job's: keep its own cache entry
+      - name: Install rs-api and its dependencies only (no rs-train, so no torch)
+        run: uv sync --locked --package rs-api --group dev
       - name: Type-check rs-api
-        run: uv run pyright packages/rs-api/src
+        run: uv run pyright -p . packages/rs-api/src
       - name: Parity tests (API vs replay, every task, three world seeds)
         run: uv run pytest -q packages/rs-api
       - name: Smoke test over HTTP (every golden passes strict, every shortcut is caught and paid by its blind spot)
@@ -90,8 +137,10 @@ jobs:
       run:
         working-directory: apps/helpdesk
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm

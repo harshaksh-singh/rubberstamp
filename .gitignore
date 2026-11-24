@@ -10,6 +10,8 @@ worlds/*.sqlite
 *.sqlite3
 results/**/raw/
 .DS_Store
+.coverage
+.coverage.*
 # training outputs (adapters, checkpoints, rollouts) stay local; publish summaries deliberately
 results/main/
 results/smoke/

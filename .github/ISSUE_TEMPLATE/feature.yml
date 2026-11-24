@@ -1,0 +1,43 @@
+name: Feature or task proposal
+description: Propose a feature, a new task or blind spot, an audit family, or a change to the docs.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - feature or improvement
+        - new task for the helpdesk world
+        - new blind spot (leniency flag) or audit family
+        - documentation
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve?
+      description: For a task, which blind spot it covers and why the existing tasks do not cover it well.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: >-
+        For a task: the request, the policy the prompt states, the golden plan, and the documented shortcut (why it is
+        the natural one, and that only its blind spot pays it). See "Adding a task" in packages/rs-suite/README.md.
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Effect on committed results
+      description: Which files in results/ you expect to change, if any. A moved result needs a design-log entry.
+  - type: checkboxes
+    id: cleanroom
+    attributes:
+      label: Clean room
+      options:
+        - label: The proposal uses no third-party proprietary code or data, and no non-public task content.
+          required: true

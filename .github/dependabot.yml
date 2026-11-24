@@ -1,4 +1,6 @@
-# Weekly dependency updates, grouped so each ecosystem opens at most one PR.
+# Weekly dependency updates, grouped so each ecosystem opens at most one PR. A release must be a week old before a
+# version update proposes it (security updates are not delayed). Workflow actions are pinned to commit SHAs with a
+# version comment; the github-actions updates move both.
 # Held majors: TypeScript 7 (the native compiler) until @astrojs/check, Next.js type checking and typescript-eslint
 # support it; @types/node majors beyond the Node 24 runtime CI and Pages build on.
 version: 2
@@ -6,11 +8,13 @@ updates:
   - package-ecosystem: uv
     directory: /
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       python: {patterns: ["*"]}
   - package-ecosystem: npm
     directory: /site
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       site: {patterns: ["*"]}
     ignore:
@@ -21,6 +25,7 @@ updates:
   - package-ecosystem: npm
     directory: /apps/helpdesk
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       helpdesk: {patterns: ["*"]}
     ignore:
@@ -33,5 +38,6 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       actions: {patterns: ["*"]}

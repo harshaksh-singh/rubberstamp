@@ -1,7 +1,15 @@
 [project]
 name = "rubberstamp"
-version = "0.0.1"
-requires-python = ">=3.12,<3.14"
+# One version for the root, every member, CITATION.cff and apps/helpdesk: scripts/check_metadata.py checks it.
+version = "0.1.0"
+description = "Which grader blind spots does RL learn to exploit, and can a pre-training audit catch them first? (workspace root)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "harshaksh-singh", email = "singhharshaksh@gmail.com" }
+]
+requires-python = ">=3.12, <3.14"
 # The workspace installs the optional extras too (the MCP server, the audit target), so it behaves as before the
 # split; a wheel of rs-world or rs-suite alone stays free of fastmcp and rs-audit.
 dependencies = ["rs-core", "rs-verify", "rs-audit", "rs-world[mcp]", "rs-suite[audit]", "rs-train", "rs-api"]
@@ -9,6 +17,13 @@ dependencies = ["rs-core", "rs-verify", "rs-audit", "rs-world[mcp]", "rs-suite[a
 [project.optional-dependencies]
 # vLLM for the rented Linux GPU box: `uv sync --extra gpu` from the workspace root (rs-train defines the extra).
 gpu = ["rs-train[gpu]"]
+
+[project.urls]
+Homepage = "https://harshaksh-singh.github.io/rubberstamp/"
+Source = "https://github.com/harshaksh-singh/rubberstamp"
+Documentation = "https://github.com/harshaksh-singh/rubberstamp#readme"
+Changelog = "https://github.com/harshaksh-singh/rubberstamp/blob/main/CHANGELOG.md"
+Issues = "https://github.com/harshaksh-singh/rubberstamp/issues"
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -29,6 +44,7 @@ dev = [
     "ruff>=0.8",
     "pyright>=1.1.390",
     "pytest-xdist>=3.8",
+    "pytest-cov>=7.0",
     "httpx>=0.28.1",  # FastAPI's TestClient
 ]
 
@@ -42,3 +58,30 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["packages", "tests"]
 markers = ["slow: needs network, GPUs or large downloads"]
+
+[tool.coverage.run]
+# `pytest --cov` measures the seven packages (CI prints the report to the job summary).
+source_pkgs = ["rs_core", "rs_verify", "rs_audit", "rs_world", "rs_suite", "rs_train", "rs_api"]
+
+[tool.coverage.report]
+skip_empty = true
+exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:"]
+
+[tool.pyright]
+# `uv run pyright -p .` checks these paths with these settings (a new member's src goes in this list). Pass `-p .`:
+# without it the pyright CLI prefers a pyrightconfig.json in any parent directory over this table. Package tests
+# (packages/*/tests) are not type-checked yet: they have about 110 errors, nearly all Optional access inside
+# assertions, in files other tracks are changing.
+include = [
+    "packages/rs-core/src",
+    "packages/rs-verify/src",
+    "packages/rs-audit/src",
+    "packages/rs-world/src",
+    "packages/rs-suite/src",
+    "packages/rs-train/src",
+    "packages/rs-api/src",
+    "scripts",
+    "tests",
+]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"

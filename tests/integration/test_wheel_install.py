@@ -12,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("wheel_check", ROOT / "scripts" / "wheel_check.py")
+assert spec is not None and spec.loader is not None
 wheel_check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wheel_check)
 

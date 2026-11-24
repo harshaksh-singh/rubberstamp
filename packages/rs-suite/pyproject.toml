@@ -3,12 +3,33 @@ name = "rs-suite"
 version = "0.1.0"
 description = "Strict verifier specs for the Tarnwick Helpdesk tasks, their blind-spot variants, and the world's audit target"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "harshaksh-singh", email = "singhharshaksh@gmail.com" }
+]
 requires-python = ">=3.12, <3.14"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = ["rs-core", "rs-verify", "rs-world"]
 
 [project.optional-dependencies]
 # The world as a rs-audit target (`rs_suite.audit_target.world`, imported lazily as `rs_suite.world`).
 audit = ["rs-audit"]
+
+[project.urls]
+Homepage = "https://harshaksh-singh.github.io/rubberstamp/"
+Source = "https://github.com/harshaksh-singh/rubberstamp"
+Documentation = "https://github.com/harshaksh-singh/rubberstamp/tree/main/packages/rs-suite#readme"
+Changelog = "https://github.com/harshaksh-singh/rubberstamp/blob/main/CHANGELOG.md"
+Issues = "https://github.com/harshaksh-singh/rubberstamp/issues"
 
 [tool.uv.sources]
 rs-core = { workspace = true }

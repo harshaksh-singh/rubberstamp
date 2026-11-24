@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use RubberStamp, please cite it as below."
+message: "If you use RubberStamp, please cite it as below, with the commit you used until a release is tagged."
 title: "RubberStamp: which grader blind spots does RL learn to exploit, and can a pre-training audit catch them first?"
 type: software
 authors:
@@ -7,8 +7,9 @@ authors:
 repository-code: "https://github.com/harshaksh-singh/rubberstamp"
 url: "https://harshaksh-singh.github.io/rubberstamp/"
 license: MIT
+# The planned first release. No version is tagged yet; add date-released (and a DOI, if one is minted) when v0.1.0
+# is tagged. scripts/check_metadata.py keeps this equal to the version in every pyproject.toml.
 version: 0.1.0
-date-released: 2026-11-24
 keywords:
   - reinforcement learning
   - reward hacking

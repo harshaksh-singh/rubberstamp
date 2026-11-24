@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/harshaksh-singh/rubberstamp/security/advisories/new
+    about: Report it privately through GitHub's security advisories. See SECURITY.md.
+  - name: Project site
+    url: https://harshaksh-singh.github.io/rubberstamp/
+    about: The results, the audit explorer and the blind-spot matrix.

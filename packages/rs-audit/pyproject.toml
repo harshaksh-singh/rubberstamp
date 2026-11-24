@@ -3,11 +3,32 @@ name = "rs-audit"
 version = "0.1.0"
 description = "RubberStamp adapter for OpenAdapt verifier_audit: audit verifier variants before RL training"
 readme = "README.md"
-requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "harshaksh-singh", email = "singhharshaksh@gmail.com" }
+]
+requires-python = ">=3.12, <3.14"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = [
     "openadapt-flow==3.4.0",
     "rs-core",
 ]
+
+[project.urls]
+Homepage = "https://harshaksh-singh.github.io/rubberstamp/"
+Source = "https://github.com/harshaksh-singh/rubberstamp"
+Documentation = "https://github.com/harshaksh-singh/rubberstamp/tree/main/packages/rs-audit#readme"
+Changelog = "https://github.com/harshaksh-singh/rubberstamp/blob/main/CHANGELOG.md"
+Issues = "https://github.com/harshaksh-singh/rubberstamp/issues"
 
 [project.scripts]
 rs-audit = "rs_audit.cli:main"

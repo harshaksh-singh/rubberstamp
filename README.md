@@ -102,6 +102,10 @@ uv run python scripts/shortcut_matrix.py                # every shortcut against
 uv run python scripts/instance_matrix.py                # golden, shortcut and no-op on all 500 instances
 ```
 
+On Linux, `uv sync` also downloads torch's CUDA wheels (about 3 GB), because rs-train's training stack is part of
+the default install. The packages are not published on PyPI: install them from a clone with `uv sync`, not one by one
+with pip (see [SECURITY.md](SECURITY.md)).
+
 The GPU runbook (base sweep, go/no-go gate, seeds, analysis) is in [`packages/rs-train/README.md`](packages/rs-train/README.md).
 
 ## What comes next
@@ -119,7 +123,7 @@ The GPU runbook (base sweep, go/no-go gate, seeds, analysis) is in [`packages/rs
 Every number above traces to a file in `results/` with its run card. Tests regenerate the committed audit results
 and compare them byte for byte, so a code change that moves a result fails the suite until the design log records it.
 The site and the charts read `site/src/data/site.json`, which `scripts/site_data.py` generates from those results; CI
-fails if it is stale.
+fails if it or the README charts are stale.
 
 ## Helpdesk app (UI/API parity)
 
@@ -144,13 +148,19 @@ uv run python scripts/drive_api.py --task t08_refund_with_approval --plan shortc
 
 [`site/`](site) is an [Astro](https://astro.build) 7 project with Tailwind CSS 4 and GSAP. The charts are drawn as SVG
 at build time from the generated data (the README images come from the same code: `cd site && npm run charts`), and
-the social preview card is rendered at build time with satori. The `Site` workflow deploys it to GitHub Pages on every
-push to `main`; the `CI` workflow lints, type-checks and tests the Python workspace, builds the site, runs rs-api's
-parity tests and an HTTP smoke test, and lints, type-checks and builds the helpdesk app.
+the social preview card is rendered at build time with satori. The `Site` workflow deploys it to GitHub Pages after
+`CI` passes on a push to `main`; the `CI` workflow lints, type-checks and tests the Python workspace, builds the site,
+runs rs-api's parity tests and an HTTP smoke test, and lints, type-checks and builds the helpdesk app.
 
 ```bash
 cd site && npm ci && npm run dev     # http://localhost:4321/rubberstamp/
 ```
+
+## Contributing and security
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup, the checks and how to add a task;
+[CHANGELOG.md](CHANGELOG.md) lists the changes. Report vulnerabilities privately, as described in
+[SECURITY.md](SECURITY.md).
 
 ## License
 
