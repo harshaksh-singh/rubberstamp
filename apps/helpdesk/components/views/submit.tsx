@@ -89,7 +89,7 @@ export function SubmitView() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Panel aria-labelledby="resolve-title" className="self-start">
           <PanelHeader id="resolve-title" title="Resolution" meta={<Mono className="text-fg-subtle">{CLAIM_TOOL}</Mono>} />
-          <form onSubmit={onSubmit} className="space-y-3 px-4 py-4">
+          <form onSubmit={onSubmit} noValidate className="space-y-3 px-4 py-4">
             <div>
               <label htmlFor={fieldId} className="mb-1 block text-[12px] font-medium text-fg-muted">
                 Summary <span className="text-bad">*</span>

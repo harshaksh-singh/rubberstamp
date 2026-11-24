@@ -2,16 +2,31 @@
 
 import { useState } from "react";
 
-import { useRead } from "@/lib/episode";
+import { useEpisode, useRead } from "@/lib/episode";
 import { when } from "@/lib/format";
 import { SLOTS, useOpen } from "@/lib/open";
 import { resultOf, type TicketDetail, type TicketSummary } from "@/lib/records";
 
 import { CallOutcome } from "../call-view";
 import { ToolForm } from "../tool-form";
-import { Badge, Button, cn, EmptyState, KeyValues, Mono, PageHeader, Panel, PanelHeader, RowList, Spinner, StatusBadge } from "../ui";
+import {
+  ApiFailure,
+  Badge,
+  Button,
+  cn,
+  EmptyState,
+  KeyValues,
+  Mono,
+  PageHeader,
+  Panel,
+  PanelHeader,
+  RowList,
+  Spinner,
+  StatusBadge,
+} from "../ui";
 
 export function TicketsView() {
+  const { submitted } = useEpisode();
   const list = useRead(SLOTS.ticketList, "list_tickets");
   const detail = useRead(SLOTS.ticket, "get_ticket");
   const tickets = resultOf<{ tickets: TicketSummary[] }>(list.call, "tickets")?.tickets;
@@ -37,6 +52,7 @@ export function TicketsView() {
               rowKey={(t) => t.id}
               selected={open?.ticket.id}
               onOpen={(t) => detail.read({ ticket_id: t.id })}
+              disabled={submitted}
               label={(t) => `Open ticket ${t.id}: ${t.subject}, ${t.status}, ${t.priority} priority`}
               render={(t) => (
                 <div className="grid gap-0.5">
@@ -58,11 +74,10 @@ export function TicketsView() {
           )}
         </Panel>
 
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-3">
+          {detail.failure ? <ApiFailure title="Could not read the ticket" message={detail.failure} /> : null}
           {detail.busy && !open ? (
             <Spinner label="Opening ticket" />
-          ) : detail.failure ? (
-            <p className="text-[13px] text-bad">{detail.failure}</p>
           ) : detail.call && !detail.call.ok ? (
             <CallOutcome call={detail.call} />
           ) : open ? (
@@ -87,7 +102,8 @@ const ACTIONS = [
 
 function TicketCard({ detail, refresh }: { detail: TicketDetail; refresh: () => void }) {
   const { ticket, comments } = detail;
-  const openRecord = useOpen();
+  const { submitted } = useEpisode();
+  const opener = useOpen();
   const [action, setAction] = useState<(typeof ACTIONS)[number]["key"]>("reply");
   const afterWrite = (call: { ok: boolean }) => {
     if (call.ok) refresh();
@@ -107,7 +123,7 @@ function TicketCard({ detail, refresh }: { detail: TicketDetail; refresh: () => 
           </>
         }
         actions={
-          <Button size="sm" variant="ghost" onClick={refresh} aria-label={`Reload ticket ${ticket.id} (get_ticket)`}>
+          <Button size="sm" variant="ghost" onClick={refresh} disabled={submitted} aria-label={`Reload ticket ${ticket.id} (get_ticket)`}>
             Reload
           </Button>
         }
@@ -122,7 +138,8 @@ function TicketCard({ detail, refresh }: { detail: TicketDetail; refresh: () => 
                 size="sm"
                 variant="ghost"
                 className="-ml-2 font-mono"
-                onClick={() => openRecord("customers", SLOTS.customer, "get_customer", { customer_id: ticket.customer_id })}
+                onClick={() => opener.open("customers", SLOTS.customer, "get_customer", { customer_id: ticket.customer_id })}
+                disabled={opener.disabled}
                 aria-label={`Open customer ${ticket.customer_id} (get_customer)`}
               >
                 {ticket.customer_id}
@@ -136,7 +153,8 @@ function TicketCard({ detail, refresh }: { detail: TicketDetail; refresh: () => 
                   size="sm"
                   variant="ghost"
                   className="-ml-2 font-mono"
-                  onClick={() => openRecord("orders", SLOTS.order, "get_order", { order_id: ticket.order_id })}
+                  onClick={() => opener.open("orders", SLOTS.order, "get_order", { order_id: ticket.order_id })}
+                  disabled={opener.disabled}
                   aria-label={`Open order ${ticket.order_id} (get_order)`}
                 >
                   {ticket.order_id}
@@ -151,6 +169,7 @@ function TicketCard({ detail, refresh }: { detail: TicketDetail; refresh: () => 
             ["Resolved", when(ticket.resolved_at)],
           ]}
         />
+        {opener.failure ? <ApiFailure title="Could not open the record" message={opener.failure} /> : null}
 
         <section aria-labelledby="thread-title">
           <h3 id="thread-title" className="mb-2 text-[12px] font-medium tracking-wide text-fg-subtle uppercase">

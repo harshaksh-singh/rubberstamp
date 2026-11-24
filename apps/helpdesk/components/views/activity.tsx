@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, messageOf } from "@/lib/api";
 import { useEpisode } from "@/lib/episode";
 
 import { TimelineItem } from "../call-view";
-import { Button, EmptyState, PageHeader, Panel } from "../ui";
+import { ApiFailure, Button, EmptyState, PageHeader, Panel } from "../ui";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -21,14 +21,17 @@ export function ActivityView() {
   const { id, calls, tools } = useEpisode();
   const [filter, setFilter] = useState<Filter>("all");
   const [downloading, setDownloading] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const shown = calls.filter((call) => {
     const effect = tools.get(call.tool)?.effect;
     if (filter === "refused") return !call.ok;
     return filter === "all" || effect === filter;
   });
 
+  /** The trajectory as rs-api records it (GET /trajectory), the same file an API client would save. */
   async function download() {
     setDownloading(true);
+    setFailure(null);
     try {
       const trajectory = await api.trajectory(id);
       const url = URL.createObjectURL(new Blob([JSON.stringify(trajectory, null, 2)], { type: "application/json" }));
@@ -37,6 +40,8 @@ export function ActivityView() {
       link.download = `trajectory-${trajectory.task_id}-${id.slice(0, 8)}.json`;
       link.click();
       URL.revokeObjectURL(url);
+    } catch (exc) {
+      setFailure(messageOf(exc));
     } finally {
       setDownloading(false);
     }
@@ -53,6 +58,11 @@ export function ActivityView() {
           </Button>
         }
       />
+      {failure ? (
+        <div className="mb-3">
+          <ApiFailure title="Could not download the trajectory" message={failure} />
+        </div>
+      ) : null}
       <div className="mb-3 flex flex-wrap gap-1" role="group" aria-label="Show">
         {FILTERS.map((f) => (
           <Button key={f.key} size="sm" variant={filter === f.key ? "secondary" : "ghost"} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>

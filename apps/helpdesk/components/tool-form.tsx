@@ -2,13 +2,14 @@
 
 import { useId, useMemo, useState } from "react";
 
+import { messageOf } from "@/lib/api";
 import { useEpisode } from "@/lib/episode";
 import { money } from "@/lib/format";
 import { buildArgs, fieldsOf, initialValues, type Field, type FormValues } from "@/lib/schema";
 import type { JsonObject, ToolCall } from "@/lib/types";
 
 import { CallOutcome, EffectBadge } from "./call-view";
-import { Button, cn, Notice } from "./ui";
+import { ApiFailure, Button, cn, Notice } from "./ui";
 
 export interface ToolFormProps {
   tool: string;
@@ -30,7 +31,8 @@ export interface ToolFormProps {
 
 /**
  * A form generated from the tool's JSON Schema (its ToolSpec), submitted as one tool call through rs-api. The outcome
- * is shown as recorded: the result, or the tool's refusal.
+ * is shown as recorded: the result, or the tool's refusal. The browser validates nothing (`noValidate`, no length or
+ * range attributes): what was typed is sent, and the tool accepts or refuses it, as it would for an agent.
  */
 export function ToolForm({
   tool,
@@ -69,7 +71,7 @@ export function ToolForm({
       if (call.ok && spec?.effect === "write") setValues(initialValues(fields, { ...initial })); // ready for the next one
       onDone?.(call);
     } catch (exc) {
-      setFailure(exc instanceof Error ? exc.message : String(exc));
+      setFailure(messageOf(exc));
     } finally {
       setBusy(false);
     }
@@ -77,7 +79,12 @@ export function ToolForm({
 
   const inline = layout === "inline";
   return (
-    <form onSubmit={onSubmit} className="space-y-3" aria-describedby={showDescription ? `${formId}-desc` : undefined}>
+    <form
+      onSubmit={onSubmit}
+      noValidate
+      className="space-y-3"
+      aria-describedby={showDescription ? `${formId}-desc` : undefined}
+    >
       {showDescription ? (
         <p id={`${formId}-desc`} className="text-[13px] whitespace-pre-line text-fg-muted">
           {spec.description}
@@ -116,7 +123,7 @@ export function ToolForm({
           ) : null}
         </div>
       </div>
-      {failure ? <Notice tone="bad" title="The API did not take this call">{failure}</Notice> : null}
+      {failure ? <ApiFailure message={failure} /> : null}
       {last && !(quiet && last.ok) ? <CallOutcome call={last} /> : null}
     </form>
   );
@@ -140,7 +147,8 @@ function FieldInput({
   disabled: boolean;
 }) {
   const hintId = `${id}-hint`;
-  const hint = inline ? undefined : field.description; // inline query bars stay compact
+  // Inline query bars stay compact: no description or limits there (a refusal still says what was wrong).
+  const hint = inline ? undefined : [field.limits, field.description].filter(Boolean).join(" · ") || undefined;
   const listId = suggestions && suggestions.length > 0 ? `${id}-options` : undefined;
   const label = (
     <span className="mb-1 block text-[12px] font-medium text-fg-muted">
@@ -177,7 +185,7 @@ function FieldInput({
   const common = {
     id,
     disabled,
-    required: field.required,
+    required: field.required, // announced as required; with noValidate it blocks nothing
     "aria-describedby": hint || field.money ? hintId : undefined,
     className: "field-input",
   };
@@ -201,20 +209,19 @@ function FieldInput({
         {...common}
         rows={4}
         value={text}
-        minLength={field.minLength}
-        maxLength={field.maxLength}
         onChange={(event) => onChange(event.target.value)}
       />
     );
   } else if (field.kind === "integer" || field.kind === "number") {
+    // A text input, not type="number": a number input sends "" for text it cannot parse, where an agent's
+    // "12abc" reaches the tool and is refused as it is.
     control = (
       <input
         {...common}
-        type="number"
-        inputMode="numeric"
-        min={field.min}
-        max={field.max}
-        step={field.step ?? "any"}
+        type="text"
+        inputMode={field.kind === "integer" ? "numeric" : "decimal"}
+        autoComplete="off"
+        spellCheck={false}
         value={text}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -227,8 +234,6 @@ function FieldInput({
         autoComplete="off"
         spellCheck={false}
         list={listId}
-        minLength={field.minLength}
-        maxLength={field.maxLength}
         value={text}
         onChange={(event) => onChange(event.target.value)}
       />
