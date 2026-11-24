@@ -31,6 +31,8 @@ INVALID = [
     lambda: FieldPred(path="/s", op="in", value="abc"),
     lambda: FieldPred(path="/s", op="regex", value="("),
     lambda: FieldPred(path="/s", op="regex", value=5),
+    lambda: FieldPred(path="/s", op="not_regex", value="("),
+    lambda: FieldPred(path="/s", op="not_regex", value=None),
     lambda: FieldPred(path="/s", op="exists", value="yes"),
     lambda: FieldPred(path="/s", op="changed", value="x"),
     lambda: FieldPred(path="/s", op="like", value="x"),

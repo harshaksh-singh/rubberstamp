@@ -70,7 +70,13 @@
     {
       "id": "mark_before_resolve",
       "kind": "before",
-      "a": {"tool": "update_order_status", "args": [{"path": "/order_id", "op": "eq", "value": "ORD-00184"}]},
+      "a": {
+        "tool": "update_order_status",
+        "args": [
+          {"path": "/order_id", "op": "eq", "value": "ORD-00184"},
+          {"path": "/status", "op": "eq", "value": "delivered"}
+        ]
+      },
       "b": {
         "tool": "update_ticket_status",
         "args": [

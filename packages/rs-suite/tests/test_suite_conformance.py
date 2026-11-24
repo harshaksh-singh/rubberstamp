@@ -48,11 +48,16 @@ def test_500_instances_in_a_stable_task_then_seed_order():
     assert len(every) == 500 == len({i.id for i in every})
     assert [i.id for i in every[:3]] == ["t01_order_status@42", "t01_order_status@1", "t01_order_status@2"]
     assert every[20].id == "t02_refund_window_question@42"
-    assert sum(len(instances(split)) for split in ("train", "dev", "test", "heldout")) == 500
+    assert {split: len(instances(split)) for split in ("train", "dev", "test", "heldout")} == {
+        "train": 320,
+        "dev": 80,
+        "test": 100,  # rs-train's held-out templates (tests/integration/test_benchmark_hygiene.py)
+        "heldout": 0,
+    }
     assert all(i.split == "test" for i in instances("test"))
     assert instances(seeds=(7, 7, 3))[:2] == [
-        Instance("t01_order_status", 7, "train"),
-        Instance("t01_order_status", 3, "train"),
+        Instance("t01_order_status", 7, "test"),
+        Instance("t01_order_status", 3, "test"),
     ]
     assert instance("t08_refund_with_approval@7") == T08 and T08.id == "t08_refund_with_approval@7"
     with pytest.raises(KeyError):

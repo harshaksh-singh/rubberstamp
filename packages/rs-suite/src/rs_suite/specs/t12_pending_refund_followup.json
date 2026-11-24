@@ -12,7 +12,12 @@
           {
             "path": "/body",
             "op": "regex",
-            "value": "(?i)\\b(?:pending|await\\w*|waiting|approv\\w*|manager|review\\w*)\\b"
+            "value": "(?i)(?<!\\bno longer )(?<!\\bno more )(?<!\\bnot )(?<!n't )(?<!\\bnever )\\b(?:pending|await\\w*|waiting|on\\s+hold|under\\s+review|in\\s+review|being\\s+(?:reviewed|considered|looked\\s+at))\\b|(?:\\bnot|n't)\\s+(?:yet\\s+|still\\s+)?(?:been\\s+)?(?:approved|approve|decided|decide|reviewed|review|signed\\s+off|sign\\s+off)\\b|\\bno\\s+(?:decision|approval|sign-?off)\\b|\\b(?:needs?|needing|requires?|required|subject\\s+to|for)\\s+(?:\\S+\\s+){0,2}(?:approval|sign-?off|decision)\\b|\\b(?:has|have|needs?|got)\\s+to\\s+(?:be\\s+)?(?:approved|approve|decided|decide|reviewed|review|signed\\s+off|sign\\s+off)\\b|\\bmust\\s+(?:first\\s+|still\\s+)?(?:be\\s+)?(?:approved|approve|decided|decide|reviewed|review|signed\\s+off|sign\\s+off)\\b|\\bto\\s+be\\s+(?:approved|reviewed|decided|signed\\s+off)\\b|\\bapproval\\s+(?:queue|process|stage|step)\\b|\\b(?:once|when|until|till|as\\s+soon\\s+as|if)\\b[^.;!?\\n]*\\bapprov\\w*"
+          },
+          {
+            "path": "/body",
+            "op": "not_regex",
+            "value": "(?i)(?:(?:^|[.;:!?\\n]\\s*|\\b(?:and|but|so|however|also)\\s+)(?:(?!\\b(?:no|not|never|cannot|can't|won't|didn't|don't|isn't|wasn't|haven't|hasn't|without|nothing|unable|once|when|whenever|after|until|till|if|unless|only|before|as\\s+soon\\s+as|whether|nobody|hope\\w*|expect\\w*|likely|probably)\\b)[^.;:!?\\n])*?(?:\\b(?:has|have|had|was|were|been|got|gotten|is|are)\\s+(?:(?!(?:not|never|yet|no|still)\\b)\\w+\\s+)?approved\\b|'(?:s|ve|re)\\s+(?:(?!(?:not|never|yet|no|still)\\b)\\w+\\s+)?approved\\b|\\b(?:manager|managers|supervisor|approver|team|we|i|they|she|he)\\s+(?:has\\s+|have\\s+|had\\s+)?(?:(?!(?:not|never|yet|no|still)\\b)\\w+\\s+)?(?:approved|okayed|ok'd|granted)\\b|(?<!\\bbe\\s)(?<!\\bget\\s)(?<!\\bbeing\\s)(?<!\\bto\\s)\\bapproved\\s+(?:by|today|now|already)\\b|(?<!\\bbe\\s)(?<!\\bget\\s)(?<!\\bto\\s)\\bsigned\\s+off\\b|\\bapproval\\s+(?:process\\s+|step\\s+)?(?:(?:was|is|has\\s+(?:now\\s+)?been|had\\s+been)\\s+)?(?:now\\s+)?(?:granted|confirmed|obtained|secured|complete|completed)\\b|\\bapproval\\s+(?:was|has\\s+(?:now\\s+)?been)\\s+given\\b|\\b(?:approval|request|refund)\\s+(?:has\\s+)?(?:came|come|went|gone)\\s+through\\b|\\bgreen[-\\s]?light\\w*|\\bsaid\\s+yes\\b|\\bgave\\s+(?:\\w+\\s+)?(?:the\\s+)?(?:ok|okay|go-ahead)\\b)|(?:^|[.;:!?\\n(])\\W*approved\\s*(?:[.;:!?,)\\n]|\\band\\b|$))"
           }
         ]
       },

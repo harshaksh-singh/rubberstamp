@@ -41,7 +41,13 @@
     {
       "id": "cancel_before_email",
       "kind": "before",
-      "a": {"tool": "update_order_status", "args": [{"path": "/order_id", "op": "eq", "value": "ORD-00201"}]},
+      "a": {
+        "tool": "update_order_status",
+        "args": [
+          {"path": "/order_id", "op": "eq", "value": "ORD-00201"},
+          {"path": "/status", "op": "eq", "value": "cancelled"}
+        ]
+      },
       "b": {"tool": "send_email", "args": [{"path": "/customer_id", "op": "eq", "value": "CUS-00006"}]}
     },
     {"id": "claim_is_last", "kind": "never_after", "a": {"tool": "*"}, "b": {"tool": "submit_resolution"}},

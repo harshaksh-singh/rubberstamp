@@ -111,6 +111,7 @@ regexes, `approx` without `tol`, and `changed` on call args.
 | `approx` | the value is a number within `tol` of `value` |
 | `in` | the value equals one item of the list `value` |
 | `regex` | the value is a string and `re.search(value, ...)` finds a match |
+| `not_regex` | the value is a string and `re.search(value, ...)` finds no match (a missing field is false), e.g. "the reply names no other date" |
 | `exists` | the field is present (with `value=False`: absent) |
 | `changed` / `unchanged` | the value at `path` differs / is the same in the before- and after-row |
 | `any` | at least one predicate in `any_of` holds (`path` is `""`), e.g. "the subject or the body names the order" |

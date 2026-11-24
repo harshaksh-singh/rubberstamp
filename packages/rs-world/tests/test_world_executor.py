@@ -77,3 +77,28 @@ def test_rest_mcp_parity():
         assert listed[spec.name].annotations.read_only_hint is (spec.effect == "read"), spec.name
         assert listed[spec.name].annotations.idempotent_hint is spec.idempotent, spec.name
         assert listed[spec.name].input_schema == spec.params, spec.name
+
+
+def test_mcp_refuses_a_string_boolean_and_records_it_as_sent():
+    """F15 over MCP: FastMCP passes the client's arguments through, and the world refuses `public: "false"` (lax mode
+    stored it as an internal note while the trajectory held the string), so the recorded call is a refusal."""
+    fastmcp = pytest.importorskip("fastmcp")
+    from rs_world.mcp_server import build_mcp
+
+    task = load_task("t04_resolve_with_comment")
+    ticket = next(a["ticket_id"] for t, a in golden(task).calls if t == "add_ticket_comment")
+    args = {"ticket_id": ticket, "body": "Replacement confirmed.", "public": "false"}
+
+    async def via_mcp():
+        with EXECUTOR.session(task) as session:
+            before = snapshot_digest(session.snapshot(), SCHEMA)
+            async with fastmcp.Client(build_mcp(session)) as client:
+                result = await client.call_tool("add_ticket_comment", args, raise_on_error=False)
+            return result, session.calls, before, snapshot_digest(session.snapshot(), SCHEMA)
+
+    try:
+        result, calls, before, after = asyncio.run(via_mcp())
+    except (AttributeError, TypeError) as exc:  # a FastMCP client API change, not a world bug
+        pytest.skip(f"FastMCP client API differs: {exc}")
+    assert result.is_error and "valid boolean" in str(result.content)
+    assert [(c.ok, c.args) for c in calls] == [(False, args)] and before == after

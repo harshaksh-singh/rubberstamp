@@ -55,6 +55,12 @@ VALUE_OPS = [
     (P("regex", "/s", "ose"), True),
     (P("regex", "/s", "^ose"), False),
     (P("regex", "/n", "5"), False),
+    # not_regex: a string with no match; a missing field or a non-string is false, as for regex
+    (P("not_regex", "/s", "^ose"), True),
+    (P("not_regex", "/s", "ose"), False),
+    (P("not_regex", "/n", "x"), False),
+    (P("not_regex", "/missing", "x"), False),
+    (P("not_regex", "/z", "x"), False),
     # exists: presence (a null value is present); value=False means absent
     (P("exists", "/z"), True),
     (P("exists", "/missing"), False),
@@ -148,6 +154,13 @@ def test_pointer_roundtrip(path_keys, leaf):
 def test_eq_and_ne_are_complements(doc, key, value):
     path = pointer(key)
     assert holds(P("eq", path, value), doc) != holds(P("ne", path, value), doc)
+
+
+@given(st.dictionaries(keys, json_value, max_size=4), keys, st.sampled_from(["", "a", "^x", "[0-9]", "(?i)CLO"]))
+def test_regex_and_not_regex_are_complements_on_strings_and_both_false_otherwise(doc, key, pattern):
+    path = pointer(key)
+    found, absent = holds(P("regex", path, pattern), doc), holds(P("not_regex", path, pattern), doc)
+    assert (found != absent) if isinstance(doc.get(key), str) else (not found and not absent)
 
 
 @given(st.dictionaries(keys, json_value, max_size=3), st.dictionaries(keys, json_value, max_size=3), keys)
