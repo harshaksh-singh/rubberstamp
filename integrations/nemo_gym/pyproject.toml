@@ -1,0 +1,42 @@
+[project]
+name = "rs-nemo-gym"
+version = "0.1.0"
+description = "RubberStamp's helpdesk world as a NeMo Gym resources server"
+requires-python = ">=3.13.14, <3.14"
+license = "MIT"
+dependencies = [
+    "nemo-gym==0.7.0",
+    "rs-core",
+    "rs-verify",
+    "rs-world",
+    "rs-suite",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-xdist>=3.8", "pytest-asyncio>=0.24", "httpx>=0.28.1", "ruff>=0.8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+rs-core = { path = "../../packages/rs-core", editable = true }
+rs-verify = { path = "../../packages/rs-verify", editable = true }
+rs-world = { path = "../../packages/rs-world", editable = true }
+rs-suite = { path = "../../packages/rs-suite", editable = true }
+
+[tool.pytest.ini_options]
+# `resources_servers.rubberstamp_helpdesk` imports from this directory (a namespace package, like Gym's own tree).
+pythonpath = ["."]
+testpaths = ["resources_servers/rubberstamp_helpdesk/tests"]
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+extend-exclude = ["resources_servers/rubberstamp_helpdesk/.venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["resources_servers"]

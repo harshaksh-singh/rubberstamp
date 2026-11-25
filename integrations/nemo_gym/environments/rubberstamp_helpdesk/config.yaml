@@ -1,0 +1,2 @@
+config_paths:
+- resources_servers/rubberstamp_helpdesk/configs/rubberstamp_helpdesk.yaml
