@@ -15,7 +15,7 @@ digest = "sha256:08aee2adf9e0c638109927e404e5934636cb02bc29507b6946fb204ae84daf1
 
 [[tasks]]
 name = "rubberstamp/t08-refund-with-approval-s42"
-digest = "sha256:c5c05942cb280315682d5565735fc0801c5ef4741fc5781fe5c4a66717aed68c"
+digest = "sha256:83340b2ed69e910869811c67a6c276da8667945423fd5b789a2b2a0ad768c649"
 
 [[tasks]]
 name = "rubberstamp/t15-return-received-email-s7"
