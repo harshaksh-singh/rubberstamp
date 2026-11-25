@@ -1,0 +1,65 @@
+[project]
+name = "rs-harbor"
+version = "0.1.0"
+description = "RubberStamp as a Harbor dataset: one task folder per instance, an MCP sidecar and a separate replay verifier"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "harshaksh-singh", email = "singhharshaksh@gmail.com" }
+]
+requires-python = ">=3.12, <3.14"
+# The base install is the world. The helpdesk image adds `sidecar` (rs-world's MCP server: no specs, no graders next
+# to the agent's tools); the verifier image adds `verifier` (rs-suite's graders, no MCP server). Generating the
+# dataset and the tests need `verifier` and `sidecar`; `harbor` is the pinned Harbor CLI and models
+# (`uv sync --all-extras` for development).
+dependencies = ["rs-core", "rs-world"]
+
+[project.optional-dependencies]
+sidecar = ["rs-world[mcp]"]
+verifier = ["rs-verify", "rs-suite"]
+harbor = ["harbor==0.27.0"]
+
+[project.scripts]
+rs-harbor = "rs_harbor.cli:main"
+rs-harbor-serve = "rs_harbor.sidecar:main"
+rs-harbor-export = "rs_harbor.export:main"
+rs-harbor-grade = "rs_harbor.grade:main"
+
+[tool.uv.sources]
+rs-core = { path = "../../packages/rs-core", editable = true }
+rs-verify = { path = "../../packages/rs-verify", editable = true }
+rs-world = { path = "../../packages/rs-world", editable = true }
+rs-suite = { path = "../../packages/rs-suite", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3.8",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["datasets"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["docker: builds images and runs Harbor trials in Docker (slow; never runs by default)"]
+addopts = "-m 'not docker'"
+
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
