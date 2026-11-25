@@ -1,12 +1,11 @@
 # Industry checklist
 
 A review of the repository against common practice for open-source research code, RL environments and benchmarks,
-taken on 2026-11-24 and updated after the CI, packaging and community-file fixes on the same day. Fixes in other areas
-(the site, rs-api, the console, rs-train and the graders) were still being made when this was written; their rows
-say "in progress" until they land.
+taken on 2026-11-24, updated after the CI, packaging and community-file fixes on the same day, and updated again on
+2026-11-25 once the site, rs-api, console, rs-train, grader and integration changes had all merged.
 
-Status: **pass** meets the item; **partial** meets part of it; **fail** does not; **in progress** is being fixed in
-another change. "Was" gives the status at the review, where it changed.
+Status: **pass** meets the item; **partial** meets part of it; **fail** does not; "Was" gives the status at the
+review, where it changed.
 
 ## Packaging
 
@@ -24,7 +23,7 @@ another change. "Was" gives the status at the review, where it changed.
 | Item | Status | Notes |
 |---|---|---|
 | Locked dependencies | pass | `uv.lock` (with hashes) and the two `package-lock.json` files; CI installs with `uv sync --locked` and `npm ci`. |
-| Exact pins for data-generating dependencies | partial | Unchanged here. `openadapt-flow==3.4.0` and `trl==1.18.2` are exact; `faker>=40.63.0`, which generates the world's names, is a lower bound in rs-world (locked to one version in `uv.lock`). Outside this change. |
+| Exact pins for data-generating dependencies | pass (was partial) | `faker==40.63.0` (it generates the world's names) is pinned exactly in rs-world to the locked version, a test checks that pin, lock and installed version agree, and Dependabot holds it (a bump is a deliberate re-pin with a design-log entry); `openadapt-flow==3.4.0` and `trl==1.18.2` are exact. |
 | Seeds and pinned world digest | pass | World seeds, a design seed and per-seed instances; the seed-42 digest is pinned by a test. |
 | Deterministic, byte-for-byte results | pass | Tests regenerate the committed results and compare bytes; `npm run charts` reproduces `docs/assets/*.svg`, and CI now checks that. |
 | Run cards / provenance | partial | Unchanged. Run cards record families, tool schemas and the openadapt-flow version, but no commit or package versions; adding them would change every committed result. |
@@ -75,24 +74,24 @@ another change. "Was" gives the status at the review, where it changed.
 |---|---|---|
 | README quickstart works verbatim | pass | Clone, `uv sync`, the audit and shortcut-matrix scripts reproduce the committed results. |
 | Architecture documentation | pass | Package table, per-package READMEs, walkthroughs and the design log. |
-| Environment / dataset card | partial | Unchanged here. The rs-world README documents schema, tools, enforcement, seeding and tasks, but has no intended-use, contamination or limitations section. |
-| API reference | in progress | rs-api track. |
-| Limitations / known issues | in progress | Site and README track. |
-| Docs consistent with code | in progress | rs-train track (the 3-seed design, measured opens and "no git remote" statements). |
+| Environment / dataset card | pass (was partial) | The rs-world README documents schema, tools, enforcement, seeding and tasks, and has a 'Contamination and intended use' section (benchmark data, train on train/dev, report on test); `docs/integrations.md` documents instances, splits and the reward rule. |
+| API reference | partial (was partial) | rs-api serves its OpenAPI schema and interactive docs at `/docs` (off in eval mode), and its README has the endpoint table, the error codes and the limits; the integrations have their own READMEs and `docs/integrations.md` documents the shared contract. No generated Python API docs. |
+| Limitations / known issues | pass (was partial) | The README's results say the audit counts are in-sample, list the tasks the full preset misses, and say that no RL run has tested the audit's prediction yet; the site says the same, and every integration README has a limitations section. |
+| Docs consistent with code | pass (was fail) | The rs-train README and walkthrough describe the four-seed design, design seed 6, union-of-instances opens and the remote; generated docs and data (site.json, the README charts, the instance matrix, the integration manifests) have `--check` modes in CI. |
 
 ## Benchmark hygiene
 
 | Item | Status | Notes |
 |---|---|---|
-| Canary string / contamination statement | in progress | Another track; lead to confirm the owner. |
-| Held-out split | in progress | rs-train track (task.yaml's test split versus rs-train's held-out templates). |
+| Canary string / contamination statement | pass (was fail) | One canary GUID in the BIG-bench form opens every task.yaml and oracle.py and sits beside the specs and in the suite results; the README and the rs-world README say what it is for; a test checks every file. |
+| Held-out split | pass (was fail) | task.yaml's `test` split (t06, t10, t14, t18, t24) is exactly the templates rs-train's design holds out, for both run configs; `tests/integration/test_benchmark_hygiene.py` computes the held-out set with the trainer's own design function and requires equality. |
 | Versioned task set | partial | One version for the code and the task set, but no tag to cite yet. The seed-42 digest and per-task `version` fields are pinned. |
 | Reward specification | pass | Binary reward (all checks pass), documented in the rs-verify README. |
 | Failure taxonomy | pass | 10 leniency flags, 10 verifier-independent detectors and exploit labels. |
-| Audit evaluated out-of-sample | in progress | Grader and results tracks (report the t21-t25 signal). |
+| Audit evaluated out-of-sample | partial (was fail) | Disclosed, not yet measured properly: the README and site label 9/10 and 10/10 in-sample and report the only out-of-sample signal (t21-t25, written after the families last changed: 4 of 5 flagged by the full preset). A frozen-family held-out check is in What comes next. |
 
 ## Containerization
 
 | Item | Status | Notes |
 |---|---|---|
-| Dockerfile / devcontainer | fail | Unchanged here; the adapter work in flight may add a container. |
+| Dockerfile / devcontainer | partial (was fail) | The OpenEnv adapter ships a pinned server Dockerfile (base image and uv by digest, non-root, healthcheck), and the Harbor adapter builds a tool-sidecar image and a separate verifier image. No devcontainer for the workspace. |

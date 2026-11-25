@@ -45,9 +45,26 @@ a release is tagged, cite a commit. Everything below was built between 22 and 24
   Dependabot and `CITATION.cff`.
 - **Repository files**: this changelog, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and pull
   request templates, and `docs/industry-checklist.md`.
-- **CI**: a coverage report in the job summary, a Python 3.13 job for rs-core, rs-verify, rs-world, rs-suite and
-  rs-audit, a check that the README charts match the site data, a metadata check, CodeQL, a zizmor lint of the
-  workflows, and a pip-audit and npm audit of the locked dependencies.
+- **CI**: a coverage report in the job summary (line coverage through `sys.monitoring`), a Python 3.13 job for
+  rs-core, rs-verify and rs-world, a check that the README charts match the site data, a metadata check, a check
+  that every integration's lock is current, CodeQL, a zizmor lint of the workflows, and a pip-audit and npm audit of
+  the locked dependencies.
+- **A shared foundation for integrations** (Entry 16): tasks and specs ship as package data, the MCP server and the
+  audit target are optional extras, `rs_suite.instances` is the one grading path, the world cache is thread-safe,
+  `rs-world serve --seed --host`, and `rs_suite.conformance`, the contract every adapter passes on all 500
+  instances, with a committed instance matrix and world digests.
+- **Four integrations** under `integrations/`, each its own uv project with its own CI workflow, each passing the
+  conformance contract through its own interface: OpenEnv 0.14.0 (an environment server and client, and a TRL
+  `environment_factory`), Harbor 0.27.0 (one task folder per instance, with a tool sidecar and a separate verifier
+  container), NeMo Gym 0.7.0 (a resources server, datasets and a NeMo RL recipe) and Inspect 0.3.292 (a task, a strict
+  scorer and a replay model).
+- **Eval mode for rs-api** (`--eval`): a browser agent under evaluation sees the strict verdict only, gets one
+  episode per task and no interactive docs; the harness regrades the trajectory in full. Request, argument, call and
+  cache limits.
+- **Console tests**: a Vitest and Testing Library suite for the helpdesk console's tool forms, error states and
+  resync with the server trajectory.
+- **Benchmark hygiene** (Entry 18): a contamination canary in every task file, spec and result file; the test split
+  is exactly the trainer's held-out templates; faker is pinned to the locked version.
 - **Package metadata**: every package declares the MIT license expression and ships the license file, with authors,
   classifiers and project URLs.
 
@@ -68,6 +85,12 @@ a release is tagged, cite a commit. Everything below was built between 22 and 24
 - CI and workflow hardening: actions are pinned to commit SHAs, checkouts do not keep credentials, runs on `main` are
   no longer cancelled by a newer push, and the rs-api job installs rs-api and its dependencies only (no torch).
 - `pyright` reads its settings from `[tool.pyright]` and also checks `scripts/` and `tests/`.
+- rs-train (Entry 17): four design seeds and design seed 6, chosen so every grader variant has a cell where its
+  shortcut is measured open; the audit prediction test clusters by grader variant and holds its size (3.7% at 5%,
+  where the old clustering rejected 14.0%); the base gate bounds the per-sample pass rate; flag mistakes are refused
+  before the design is measured.
+- The site states that the audit's prediction is not yet validated by an RL run and that 9/10 and 10/10 are
+  in-sample; its charts are accessible tables and every number on it comes from the generated data.
 
 ### Fixed
 
@@ -75,6 +98,13 @@ a release is tagged, cite a commit. Everything below was built between 22 and 24
   longer read as claims (F7); answers that were identical on every seed now vary by seed (F8); `status_only` no longer
   pays a no-op on t05, t09 and t19 (F9); lookup answers accept a negated status, a contrasting tier's date and US
   dates (F10).
+- Grader fixes from the CTO review (Entry 18): an answer listing many candidate dates no longer passes t02, t10 and
+  t20 (F11); t12 rejects a false "approved" (F12); order rules anchor on the stated transition (F13); `ignore_values`
+  behaves the same on every refund task (F14); tool arguments are strict JSON types, so a string `"false"` can no
+  longer run as an internal note but grade as a public reply (F15); `rs_suite.verifier` grades another seed's
+  episode with that seed's spec (F16).
+- The wheel-install test no longer depends on a warm uv cache, and the Site deploy skips a CI run whose commit is no
+  longer the head of `main`.
 
 
 [Unreleased]: https://github.com/harshaksh-singh/rubberstamp/commits/main
