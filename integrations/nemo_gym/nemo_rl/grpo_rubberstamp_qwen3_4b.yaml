@@ -1,0 +1,110 @@
+# GRPO with LoRA on rubberstamp_helpdesk: Qwen3-4B, one node, one GPU, NeMo RL v0.8.0. NOT RUN: it needs the NeMo RL
+# v0.8.0 container and a GPU. Whether one 24 GB GPU is enough is not known.
+#
+# The plan's recipe: 4 prompts x 8 generations per step, LoRA dim 16 / alpha 32 on all linear layers, thinking off,
+# simple_agent with max_steps 12 (resources_servers/rubberstamp_helpdesk/configs/rubberstamp_helpdesk.yaml), reward
+# penalties off. It is an overlay on NeMo RL's Gym recipe for multi-step tool use (workplace_assistant), as NeMo RL's
+# own examples/nemo_gym/grpo_qwen3_30ba3b_instruct.yaml is. It switches that recipe from Megatron on 8 GPUs to the
+# Automodel backend with LoRA on 1 GPU. Every key below was read from the v0.8.0 tag: examples/configs/grpo_math_1B.yaml
+# (lora_cfg, the Automodel optimizer, reward_penalties), examples/nemo_gym/*.yaml, nemo_rl/utils/config.py (`defaults`
+# may be an absolute path) and nemo_rl/algorithms/grpo.py (RewardPenaltyConfig). None was exercised here.
+#
+# In the container (/opt/nemo-rl), with this repository at $RS:
+#   export NEMO_GYM_EXTRA_ROOTS=$RS/integrations/nemo_gym            # Gym finds resources_servers/rubberstamp_helpdesk
+#   uv run --directory $RS/integrations/nemo_gym python scripts/build_gym_dataset.py
+#   gym dataset collate "+config_paths=[resources_servers/rubberstamp_helpdesk/configs/rubberstamp_helpdesk.yaml]" \
+#       +output_dirpath=$RS/integrations/nemo_gym/collated +mode=train_preparation +should_download=false
+#   uv run examples/nemo_gym/run_grpo_nemo_gym.py --config $RS/integrations/nemo_gym/nemo_rl/grpo_rubberstamp_qwen3_4b.yaml \
+#       data.train.data_path=$RS/integrations/nemo_gym/collated/train.jsonl \
+#       data.validation.data_path=$RS/integrations/nemo_gym/collated/validation.jsonl \
+#       grpo.max_num_steps=3                                           # the plan's 3-step smoke; drop it to train
+#
+# The reward is the server's `reward` (strict). The server never emits reward_components, so NeMo RL's
+# reward == sum(reward_components) check does not apply and GDPO has no lenient column to train on. A replay mismatch
+# or a lost session arrives as instance_config.mask_sample, which v0.8.0 drops from the loss while
+# should_mask_flagged_samples is true.
+defaults: /opt/nemo-rl/examples/nemo_gym/grpo_workplace_assistant_nemotron_nano_v2_9b.yaml  # edit if NeMo RL is elsewhere
+
+grpo:
+  num_prompts_per_step: 4
+  num_generations_per_prompt: 8
+
+reward_penalties:  # all off (also v0.8.0's default); none of them zeroes a strict reward
+  penalize_duplicated_reasoning: false
+  penalize_empty_final_answer: false
+  penalize_unwanted_tokens: false
+  penalize_malformed_think_tag: false
+  token_ids: null
+
+checkpointing:
+  checkpoint_dir: results/grpo-rubberstamp-qwen3-4b-lora
+
+policy:
+  model_name: Qwen/Qwen3-4B
+  tokenizer:
+    chat_template_kwargs:
+      enable_thinking: false
+  automodel_cfg:
+    enabled: true
+    tensor_parallel_size: 1
+    lora_cfg:
+      enabled: true
+      target_modules: []
+      exclude_modules: []
+      match_all_linear: true
+      dim: 16
+      alpha: 32
+      dropout: 0.0
+      dropout_position: post
+      lora_A_init: xavier
+      use_triton: true  # v0.8.0: disable when tensor_parallel_size > 1
+      restore_from: null
+  megatron_cfg:
+    enabled: false
+  optimizer:  # the Automodel optimizer of grpo_math_1B.yaml (the base recipe has none: it trains with Megatron)
+    name: torch.optim.AdamW
+    kwargs:
+      lr: 5.0e-6
+      weight_decay: 0.01
+      betas: [0.9, 0.999]
+      eps: 1.0e-8
+  generation:
+    vllm_cfg:
+      gpu_memory_utilization: 0.7  # NeMo RL's Qwen3 Gym recipe uses 0.7 against OOM at refit; the first knob to turn
+      http_server_serving_chat_kwargs:
+        enable_auto_tools: true
+        tool_parser: hermes  # Qwen3's tool-call format (the base recipe's nemotron_json is Nemotron's)
+
+data:
+  train:
+    data_path: ???  # collated/train.jsonl (train split, 300 instances)
+  validation:
+    data_path: ???  # collated/validation.jsonl (dev split, 80 instances)
+
+env:
+  should_mask_flagged_samples: true
+  nemo_gym:
+    config_paths:
+    - responses_api_models/vllm_model/configs/vllm_model_for_training.yaml  # must come first
+    - resources_servers/rubberstamp_helpdesk/configs/rubberstamp_helpdesk.yaml
+    policy_model:
+      responses_api_models:
+        vllm_model:
+          uses_reasoning_parser: false
+          extra_body:
+            chat_template_kwargs:
+              enable_thinking: false
+
+logger:
+  log_dir: logs/grpo-rubberstamp-qwen3-4b-lora
+  wandb_enabled: false
+  wandb:
+    project: grpo-rubberstamp-helpdesk
+    name: rubberstamp-helpdesk-qwen3-4b-lora-strict
+  mlflow:
+    experiment_name: grpo-rubberstamp-helpdesk
+    run_name: rubberstamp-helpdesk-qwen3-4b-lora-strict
+
+cluster:
+  gpus_per_node: 1
+  num_nodes: 1

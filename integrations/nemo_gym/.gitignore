@@ -1,0 +1,15 @@
+# Written by scripts/build_gym_dataset.py (5.4 MB together); data/example.jsonl is committed.
+resources_servers/rubberstamp_helpdesk/data/train.jsonl
+resources_servers/rubberstamp_helpdesk/data/validation.jsonl
+resources_servers/rubberstamp_helpdesk/data/test.jsonl
+# Written by Gym: the server venv (gym env test, gym env start), `gym dataset collate` outputs, Hydra run logs.
+resources_servers/rubberstamp_helpdesk/.venv/
+resources_servers/rubberstamp_helpdesk/.venv.setup.lock
+resources_servers/rubberstamp_helpdesk/data/*_prepare.jsonl
+resources_servers/rubberstamp_helpdesk/data/train_metrics.json
+resources_servers/rubberstamp_helpdesk/data/validation_metrics.json
+collated/
+outputs/
+cache/
+.pytest_cache/
+.ruff_cache/

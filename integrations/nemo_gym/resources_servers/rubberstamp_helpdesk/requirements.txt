@@ -1,0 +1,7 @@
+# The server venv `gym env test` and `gym env start` build (uv pip install -r, run from this directory). Gym keeps
+# relative paths because ../../pyproject.toml exists (integrations/nemo_gym), so this directory must stay where it is.
+nemo-gym[dev]==0.7.0
+-e ../../../../packages/rs-core
+-e ../../../../packages/rs-verify
+-e ../../../../packages/rs-world
+-e ../../../../packages/rs-suite

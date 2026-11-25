@@ -1,0 +1,67 @@
+# The NeMo Gym integration (integrations/nemo_gym): its own uv project on Python 3.13 with nemo-gym==0.7.0 and the
+# rs-* packages as editable path sources. Lint; check that the committed dataset rows and verifier cases are current;
+# validate the environment manifest with Gym's CLI; run the tests (Gym's verifier fixture and resources session
+# contract, the reward rule, and the rs_suite.conformance proof on all 500 instances x 3 plans through the server's
+# HTTP interface); then `gym env test`, which builds the server's own venv from requirements.txt and runs the fixture
+# there. No job needs Docker or a GPU. Actions are pinned to commit SHAs, as in ci.yml.
+name: Integration (NeMo Gym)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/nemo_gym/**"
+      - "packages/rs-core/**"
+      - "packages/rs-verify/**"
+      - "packages/rs-world/**"
+      - "packages/rs-suite/**"
+      - ".github/workflows/integration-nemo-gym.yml"
+  pull_request:
+    paths:
+      - "integrations/nemo_gym/**"
+      - "packages/rs-core/**"
+      - "packages/rs-verify/**"
+      - "packages/rs-world/**"
+      - "packages/rs-suite/**"
+      - ".github/workflows/integration-nemo-gym.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-nemo-gym-${{ github.ref }}
+  # A newer push supersedes a branch's or PR's run; every commit on main keeps its own result.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  nemo-gym:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: integrations/nemo_gym
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          cache-suffix: nemo-gym   # its own lock and Python: keep its own cache entry
+      - name: Install (Python 3.13.14 from .python-version, the NeMo RL v0.8.0 container's; nemo-gym 0.7.0 needs >= 3.13.14)
+        run: uv sync --locked
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Committed dataset rows and verifier cases are current
+        run: uv run python scripts/build_gym_dataset.py --check
+      - name: Write the train, validation and test splits (generated, not committed)
+        run: uv run python scripts/build_gym_dataset.py
+      - name: gym env validate
+        run: uv run gym env validate --manifest environments/rubberstamp_helpdesk/manifest.yaml
+      - name: Test (conformance on 500 x 3 over HTTP, sharded over 4 workers)
+        run: uv run pytest -q -n 4
+      - name: gym env test (Gym builds the server venv from requirements.txt)
+        run: uv run gym env test rubberstamp_helpdesk --search-dir .
