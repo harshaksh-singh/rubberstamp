@@ -16,9 +16,11 @@ from rs_inspect.dataset import parse_seeds, samples, select
 from rs_inspect.tools import CLAIM_TOOL, dropped_schema_keywords, inspect_params, submit_tool, tool_defs, work_tools
 
 
-@pytest.mark.parametrize(("split", "count"), [("train", 300), ("dev", 80), ("test", 120), ("all", 500)])
-def test_splits_hold_every_instance(split: str, count: int) -> None:
-    assert len(select(split)) == count
+@pytest.mark.parametrize("split", ["train", "dev", "test", "all"])
+def test_splits_hold_every_instance(split: str) -> None:
+    # the suite's own split sizes (task.yaml's labels, rs_suite.conformance), not a copy that can drift
+    assert len(select(split)) == len(instances(None if split == "all" else split))
+    assert len(select("all")) == 500
 
 
 def test_samples_are_the_instances() -> None:

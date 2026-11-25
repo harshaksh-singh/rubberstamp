@@ -42,6 +42,12 @@ jobs:
         run: uv run pyright -p .
       - name: Metadata is consistent (one version, license and authors everywhere)
         run: uv run python scripts/check_metadata.py
+      - name: Integration locks are current (each integrations/* project locks the workspace packages it uses)
+        run: |
+          for lock in $(git ls-files 'integrations/**/uv.lock'); do
+            echo "checking ${lock}"
+            (cd "$(dirname "$lock")" && uv lock --check)
+          done
       - name: Test (with coverage)
         run: uv run pytest -q -n auto --dist loadfile --cov --cov-report=
       - name: Coverage report

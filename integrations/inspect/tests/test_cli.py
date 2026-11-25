@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from inspect_ai.log import EvalLog, read_eval_log
 from inspect_ai.model import get_model
-from rs_suite.conformance import PLANS, expected, instance, plan_for
+from rs_suite.conformance import PLANS, expected, instance, instances, plan_for
 
 from helpers import inspect_cli, samples, score
 
@@ -30,7 +30,7 @@ def test_inspect_eval_runs_the_registered_task(tmp_path: Path) -> None:
     assert log.status == "success"
     assert log.eval.task == "rs_inspect/rubberstamp_helpdesk"
     assert log.eval.model == "rs_replay/golden"
-    ids = ["t03_open_ticket_count@42", "t09_shipping_fee_refund@42"]
+    ids = [inst.id for inst in instances("test", seeds=(42,))][:2]  # the task's default split, first two at seed 42
     assert [str(s.id) for s in log.samples or []] == ids
     for sample in log.samples or []:
         assert sample.error is None
