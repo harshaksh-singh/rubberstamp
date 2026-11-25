@@ -2241,7 +2241,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "faker", specifier = ">=40.63.0" },
+    { name = "faker", specifier = "==40.63.0" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=4.2.4" },
     { name = "pydantic", specifier = ">=2.14.4" },
     { name = "pyyaml", specifier = ">=6.0.4" },

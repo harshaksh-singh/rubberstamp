@@ -20,7 +20,7 @@ from nemo_gym.failure_kinds import SESSION_LOST
 from nemo_gym.mcp_auto_exposure import install_auto_exposure
 from nemo_gym.testing.session_conformance import check_resources_session_contract
 from nemo_gym.verifier_fixture import exercise_verifier_fixture
-from rs_suite.conformance import episode_files, expected, instance, plan_for
+from rs_suite.conformance import episode_files, expected, instance, instances, plan_for
 from rs_suite.instances import LENIENT_REWARD_ENV, LenientRewardRefused
 from rs_suite.suite import knob
 from rs_world import REGISTRY
@@ -136,7 +136,9 @@ def test_manifest_validates(tmp_path: Path, build) -> None:
     assert report.inferred_profile == report.declared_profile == "custom-gym-verifier"
     assert report.warnings == ()
     assert report.grading_mode == "strict"
-    assert {d.name: d.rows for d in report.datasets} == {"train": 300, "validation": 80, "example": 5}
+    # the suite's own split sizes (task.yaml's labels), not a copy that can drift; dev is Gym's validation set
+    sizes = {"train": len(instances("train")), "validation": len(instances("dev")), "example": 5}
+    assert {d.name: d.rows for d in report.datasets} == sizes
 
 
 def test_generated_files_are_current(build) -> None:
