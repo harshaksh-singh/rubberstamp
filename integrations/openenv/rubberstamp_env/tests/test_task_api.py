@@ -24,7 +24,8 @@ def test_splits_and_counts(server_url: str) -> None:
         {"name": "test", "type": "test"},
     ]
     counts = {s["name"]: post(server_url, "num_tasks", {"split": s["name"]}).json()["num_tasks"] for s in splits}
-    assert counts == {"train": 300, "dev": 80, "test": 120} and sum(counts.values()) == 500
+    # the suite's own split sizes (task.yaml's labels, rs_suite.conformance), not a copy that can drift
+    assert counts == {name: len(instances(name)) for name in counts} and sum(counts.values()) == 500
 
 
 @pytest.mark.parametrize("split", ["train", "dev", "test"])
@@ -37,8 +38,9 @@ def test_task_lists_follow_the_instance_order(server_url: str, split: str) -> No
     assert post(server_url, "task", {"split": split, "index": 7}).json()["task"] == tasks[7]
 
 
-@pytest.mark.parametrize(("split", "index"), [("dev", 80), ("train", 300), ("test", -1)])
-def test_an_out_of_range_index_is_a_400(server_url: str, split: str, index: int) -> None:
+@pytest.mark.parametrize(("split", "past_end"), [("dev", True), ("train", True), ("test", False)])
+def test_an_out_of_range_index_is_a_400(server_url: str, split: str, past_end: bool) -> None:
+    index = len(instances(split)) if past_end else -1
     assert post(server_url, "task", {"split": split, "index": index}).status_code == 400
 
 

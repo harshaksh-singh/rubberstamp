@@ -47,9 +47,9 @@ validation:
     - update_order_status
     - update_ticket_status
     declared_task_count:
-      train: 300
+      train: 320
       dev: 80
-      test: 120
+      test: 100
   types:
     tags:
     - tool-use
