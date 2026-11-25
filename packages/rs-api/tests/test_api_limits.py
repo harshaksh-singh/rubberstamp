@@ -133,6 +133,8 @@ def test_args_over_the_limit_are_422_and_not_recorded(api: Api) -> None:
     too_big = {"tool": "send_email", "args": {"customer_id": "CUS-00001", "subject": "s", "body": "a" * MAX_ARGS_BYTES}}
     refused = api.ok("POST", f"/episodes/{episode_id}/calls", 422, json=too_big)
     assert "the limit is" in json.dumps(refused)
+    assert all("input" not in error for error in refused["detail"]), "the oversized args are not echoed back"
+    assert len(json.dumps(refused)) < 2_000
     assert api.trajectory(episode_id)["calls"] == []
 
 

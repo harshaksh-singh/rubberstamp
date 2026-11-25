@@ -30,6 +30,8 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import FastAPI, Path, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from rs_core.models import ToolCall, Trajectory
@@ -88,6 +90,14 @@ ERROR_STATUS: dict[type[Exception], int] = {
 }
 
 
+async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
+    """FastAPI's 422 body without each error's `input`: an oversized `args` (up to the 256 KiB body limit) is not sent
+    back to the client, and nothing the request carried is echoed."""
+    assert isinstance(exc, RequestValidationError)
+    errors = [{key: value for key, value in error.items() if key != "input"} for error in exc.errors()]
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": jsonable_encoder(errors)})
+
+
 def create_app(
     store: EpisodeStore | None = None,
     *,
@@ -125,6 +135,7 @@ def create_app(
 
     for kind, code in ERROR_STATUS.items():
         app.add_exception_handler(kind, _responder(code))
+    app.add_exception_handler(RequestValidationError, _validation_error)
 
     @app.get("/health")
     def health() -> Health:

@@ -269,5 +269,13 @@ export function useRead(slot: string, tool: string) {
     },
     [run, tool, setCall],
   );
-  return { call, read, busy, failure, setCall };
+  // A result shown by another path (an inline form's onDone) replaces the last failure, as a successful read does.
+  const show = useCallback(
+    (next: ToolCall | null) => {
+      setFailure(null);
+      setCall(next);
+    },
+    [setCall],
+  );
+  return { call, read, busy, failure, setCall: show };
 }

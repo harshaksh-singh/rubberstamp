@@ -14,8 +14,9 @@ The contract, read from the installed trl 1.18.2 (`trl/trainer/grpo_trainer.py`)
 - A tool call TRL cannot parse (`parse_response` falls back to plain text, chat_template_utils.py) never
   reaches the loop and is counted nowhere: the turn just ends the rollout with the markup as its text.
   `ending` therefore treats a last turn that still holds tool-call markup as a parse failure.
-- The loop also ends with a turn whose tool calls never ran (`max_tool_calling_iterations`, or the next
-  tool output would overflow the token budget): that turn is narration, not an answer.
+- The loop also ends with a turn whose tool calls the model never saw answered: at `max_tool_calling_iterations`
+  they never ran; at the token budget TRL 1.18.2 ran them and then dropped their outputs, so they are recorded and
+  graded like any other call (rewards.py, rescore.py). Either way that turn is narration, not an answer.
 - `_calculate_rewards` passes the instances to every reward function as `environments=`, aligned with
   `completions`; `episode_for(env, completion)` turns one of them into a rs_core Episode.
 
