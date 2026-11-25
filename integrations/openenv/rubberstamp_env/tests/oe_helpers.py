@@ -33,7 +33,15 @@ def bind_port() -> socket.socket:
 
 @contextlib.contextmanager
 def serve(app: FastAPI) -> Iterator[str]:
-    """Serve `app` with uvicorn in a background thread; yield its base URL; stop it."""
+    """Serve `app` with uvicorn in a background thread; yield its base URL; stop it.
+
+    The 20 seeded worlds are built first, with no deadline: the app's start-up prewarm then finds them cached (the
+    cache is per process), and the deadline below covers only uvicorn starting. A cold build of 20 worlds in each of
+    several xdist workers took longer than the deadline on a 4-core CI runner."""
+    from rs_suite.instances import SEEDS
+    from rs_world import prewarm
+
+    prewarm(SEEDS)
     sock = bind_port()
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on"))
     thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)

@@ -112,7 +112,8 @@ def server_process(command: list[str], cwd: Path, tmp: Path) -> Iterator[tuple[s
     )
     url = f"http://127.0.0.1:{port}"
     try:
-        deadline = time.monotonic() + 90
+        # a fresh process builds all 20 seeded worlds before /health answers: minutes on a small CI runner
+        deadline = time.monotonic() + 300
         while True:
             try:
                 if httpx.get(f"{url}/health", timeout=1).status_code == 200:
