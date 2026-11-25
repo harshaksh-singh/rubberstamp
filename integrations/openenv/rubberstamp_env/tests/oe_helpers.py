@@ -18,12 +18,17 @@ PORTS = range(18500, 18520)
 
 
 def bind_port() -> socket.socket:
-    """A listening-ready socket on the first free port of the assigned range (race-free across xdist workers)."""
+    """A listening socket on the first free port of the assigned range (race-free across xdist workers).
+
+    It listens at once: on Linux, SO_REUSEADDR lets a second socket bind a port that no socket listens on yet, so two
+    workers could both bind one port and the second uvicorn then failed with EADDRINUSE (seen on CI, never on macOS,
+    which refuses the second bind). A listening socket makes the other worker's bind fail and move on."""
     for port in PORTS:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
+            sock.listen()
         except OSError:
             sock.close()
             continue

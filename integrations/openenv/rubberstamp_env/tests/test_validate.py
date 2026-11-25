@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -101,29 +102,40 @@ def child_tmp() -> Iterator[Path]:
 @contextmanager
 def server_process(command: list[str], cwd: Path, tmp: Path) -> Iterator[tuple[str, subprocess.Popen[bytes]]]:
     """Start a server process with the default settings and `tmp` as its TMPDIR; yield (url, process); stop it with
-    SIGTERM, as `docker stop` and process managers do."""
-    sock = bind_port()
-    port = sock.getsockname()[1]
-    sock.close()  # hand the port to the child process
+    SIGTERM, as `docker stop` and process managers do.
+
+    The port is chosen here and handed to the child, so another xdist worker can take it in between; the child then
+    exits with "address already in use" and the start is retried on another port (at most 3 attempts)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("RS_", "MAX_CONCURRENT_ENVS"))}
     env["TMPDIR"] = str(tmp)
-    child = subprocess.Popen(
-        [*command, "--port", str(port)], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-    )
-    url = f"http://127.0.0.1:{port}"
-    try:
+    for attempt in range(3):
+        sock = bind_port()
+        port = sock.getsockname()[1]
+        sock.close()  # hand the port to the child process
+        child = subprocess.Popen(
+            [*command, "--port", str(port)], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+        url = f"http://127.0.0.1:{port}"
         # a fresh process builds all 20 seeded worlds before /health answers: minutes on a small CI runner
-        deadline = time.monotonic() + 300
-        while True:
-            try:
-                if httpx.get(f"{url}/health", timeout=1).status_code == 200:
-                    break
-            except httpx.HTTPError:
-                pass
-            if child.poll() is not None or time.monotonic() > deadline:
-                output = child.stdout.read().decode() if child.stdout else ""
-                raise RuntimeError(f"server did not start: {output[-2000:]}")
+        deadline, healthy = time.monotonic() + 300, False
+        while not healthy:
+            with contextlib.suppress(httpx.HTTPError):
+                healthy = httpx.get(f"{url}/health", timeout=1).status_code == 200
+            if healthy or child.poll() is not None or time.monotonic() > deadline:
+                break
             time.sleep(0.2)
+        if healthy:
+            break
+        if child.poll() is None:  # alive but never healthy: stop it before reporting
+            child.kill()
+            child.wait()
+        output = child.stdout.read().decode() if child.stdout else ""
+        if "address already in use" in output.lower() and attempt < 2:
+            continue
+        raise RuntimeError(f"server did not start: {output[-2000:]}")
+    else:  # pragma: no cover - the loop always breaks or raises
+        raise RuntimeError("server did not start")
+    try:
         yield url, child
     finally:
         child.terminate()
