@@ -1,0 +1,14 @@
+# Only what the image build needs from the repository root (BuildKit reads <Dockerfile>.dockerignore).
+*
+!packages/rs-core
+!packages/rs-verify
+!packages/rs-world
+!packages/rs-suite
+!integrations/harbor/pyproject.toml
+!integrations/harbor/uv.lock
+!integrations/harbor/README.md
+!integrations/harbor/src
+!results/certify/world_digests.json
+packages/*/tests
+**/__pycache__
+**/*.pyc
